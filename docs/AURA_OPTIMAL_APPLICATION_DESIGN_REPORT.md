@@ -1,0 +1,805 @@
+# AURA Optimal Application Design Report
+
+> For: Dev team  
+> Date: 2026-04-26  
+> Status: Final product/architecture report to pair with `AURA_MVP_FINAL_EXECUTION_REPORT.md`  
+> Goal: Design the most capable AURA app around Hermes, CUA, MCP, skills, browser/web, messaging, memory, scheduling, and future isolated lanes without turning AURA into a custom agent runtime.
+
+This report reads the current MVP execution report as the engineering boundary:
+
+- AURA is the native macOS ambient shell.
+- Hermes is the agent runtime, planner, delegator, memory/tool/MCP owner, and final synthesizer.
+- CUA Driver is the approval-gated host-control lane exposed through `script/aura-cua-mcp`.
+- AURA must not become a custom agent loop, browser framework, task database, or hardcoded demo app.
+
+The optimal design is not "add every connector as a button." The optimal design
+is a thin native command layer that understands available capabilities, routes
+missions to Hermes with the right toolsets, surfaces trust and progress, and
+lets every connection degrade clearly when not configured.
+
+## Sources Reviewed
+
+Repo-local:
+
+- `docs/AURA_MVP_FINAL_EXECUTION_REPORT.md`
+- `docs/INTEGRATION_NOTES.md`
+- `docs/BETA_READINESS.md`
+- `docs/MVP_LAUNCH_CHECKLIST_FROM_CLICKY_DEMO.md`
+- `README.md`
+- `Sources/AURA/Stores/AURAStore.swift`
+- `Sources/AURA/Services/HermesService.swift`
+- `Sources/AURA/Services/CuaDriverService.swift`
+- `Sources/AURA/Views/CursorSurfaceView.swift`
+- `Sources/AURA/Views/MissionRunnerView.swift`
+- `script/aura-hermes`
+- `script/aura-cua-mcp`
+- `config/hermes-default.yaml`
+- `script/e2e_test.sh`
+
+Official Hermes docs:
+
+- https://hermes-agent.nousresearch.com/docs/user-guide/features/overview
+- https://hermes-agent.nousresearch.com/docs/user-guide/features/tools
+- https://hermes-agent.nousresearch.com/docs/user-guide/features/delegation
+- https://hermes-agent.nousresearch.com/docs/user-guide/features/mcp
+- https://hermes-agent.nousresearch.com/docs/user-guide/features/skills
+- https://hermes-agent.nousresearch.com/docs/user-guide/features/voice-mode
+- https://hermes-agent.nousresearch.com/docs/skills
+
+Runtime checks on this machine:
+
+- `./script/aura-hermes status`
+- `./script/aura-hermes doctor`
+- `./script/aura-hermes mcp list`
+- `./script/aura-hermes mcp test cua-driver`
+- `env AURA_AUTOMATION_POLICY=writeAlways AURA_CUA_ALLOW_ACTIONS=1 ./script/aura-hermes mcp test cua-driver`
+- `/Applications/CuaDriver.app/Contents/MacOS/cua-driver status`
+
+Generated design artifact:
+
+- `docs/aura-optimal-system-design.elements.json`
+- `docs/aura-optimal-system-design.excalidraw`
+- Regeneration command:
+  `npx --yes excalidraw-cli create docs/aura-optimal-system-design.elements.json -o docs/aura-optimal-system-design.excalidraw --no-checkpoint`
+
+## Executive Decision
+
+Build AURA as a connection-aware ambient mission operating system for one user.
+
+The product loop should be:
+
+```text
+invoke -> capture context -> classify capability/risk -> launch Hermes parent
+  -> show workers/progress/approvals -> hand off artifacts -> continue or close
+```
+
+AURA should own:
+
+- native invocation and UI
+- connection readiness
+- policy and approval UX
+- Hermes process lifecycle
+- derived mission/worker/artifact UI state
+- audit and recovery
+
+Hermes should own:
+
+- reasoning
+- provider routing
+- tool selection
+- subagent delegation
+- memory
+- skills
+- MCP tool usage
+- final synthesis
+
+CUA should own:
+
+- host screen/app inspection
+- host control actions
+- cursor/keyboard/window interaction
+
+The product should look like a Mac utility, not a chatbot and not a developer
+dashboard. The dashboard remains a secondary drill-down.
+
+## First Principles
+
+### 1. The user wants outcomes, not connectors
+
+Connections are implementation details. The user asks "organize my screenshots,"
+"find leads," "summarize this PDF," or "build this app." AURA decides which
+capabilities are available, what is safe, and what must be approved.
+
+### 2. Every connection has three dimensions
+
+Each connection must be modeled by:
+
+- Capability: what it can do.
+- Readiness: installed, authenticated, permissioned, reachable, configured.
+- Risk: read-only, local-write, host-control, account-action, external-send,
+  spend, credential, financial/legal/medical.
+
+Do not expose a connection just because Hermes knows about it. Expose it only
+when its readiness and risk are legible to the user.
+
+### 3. AURA's moat is trust and context, not tool ownership
+
+Hermes already supports broad tools: web, browser, terminal/file,
+code_execution, delegation, memory, skills, MCP, cron, media, messaging, and
+provider routing. AURA wins by making those capabilities safe and native on the
+Mac.
+
+### 4. The UI must represent background work as objects
+
+Hermes can delegate. AURA must turn delegated work into visible worker state.
+The user should not need to parse logs to know what is running, blocked, done,
+or failed.
+
+### 5. Runtime truth must be discovered, not assumed
+
+Official Hermes support and local availability are different. The app must
+discover runtime state from Hermes status/doctor/MCP tests and CUA readiness,
+then show what is available now.
+
+## Current Runtime Reality
+
+Ready now:
+
+- Project-local Hermes wrapper through `script/aura-hermes`.
+- OpenAI Codex auth is logged in.
+- CUA Driver daemon is running.
+- `cua-driver` MCP server is enabled through `script/aura-cua-mcp`.
+- CUA read-only tool surface is discoverable: 12 tools.
+- CUA action tool surface is discoverable when policy allows actions: 28 tools.
+- Core Hermes toolsets reported available: `browser`, `clarify`,
+  `code_execution`, `cronjob`, `terminal`, `delegation`, `feishu_doc`,
+  `feishu_drive`, `file`, `image_gen`, `memory`, `session_search`, `skills`,
+  `todo`, `tts`, `vision`, `mcp-cua-driver`.
+
+Configured but needs caution:
+
+- `config/hermes-default.yaml` seeds `model.default: gpt-5.4` and
+  `provider: openai-codex`. Treat this as setup-time config, not a product
+  claim. Doctor/status must validate the active provider/model.
+- Terminal backend is local. This is powerful and should remain policy-gated
+  for writes/state changes.
+
+Supported but not operational locally until setup is completed:
+
+- `web`: blocked by missing Exa/Parallel/Tavily/Firecrawl configuration.
+- `browser-cdp`: system dependency not met.
+- `spotify`: system dependency not met.
+- `discord` and `discord_admin`: missing Discord token.
+- `messaging`: system dependency not met.
+- `homeassistant`: system dependency not met.
+- `moa`, `rl`: missing API keys/submodule dependencies.
+- Messaging platforms in Hermes status are not configured: Telegram, Discord,
+  WhatsApp, Signal, Slack, Email, SMS, DingTalk, Feishu, WeCom, Weixin,
+  BlueBubbles, QQBot.
+
+Current AURA mission toolsets:
+
+- Read Only and Ask Per Task:
+  `web,skills,todo,memory,session_search,clarify,delegation,cua-driver`
+- Approved action and Always Allow:
+  `web,browser,terminal,file,code_execution,skills,todo,memory,session_search,clarify,delegation,cua-driver`
+
+This is directionally right, but AURA needs a connection registry so missing
+providers do not become confusing mission failures.
+
+## Target Architecture
+
+Detailed Excalidraw system design:
+
+- Source elements: `docs/aura-optimal-system-design.elements.json`
+- Openable drawing: `docs/aura-optimal-system-design.excalidraw`
+
+The drawing shows the concrete target topology:
+
+- Native Mac product surfaces: menu bar, ambient prompt, worker palette, badge
+  stack, hover cards, activity view, readiness center.
+- AURA core: context snapshot, connection registry, capability plan, risk
+  policy, approval gate, mission envelope, Hermes process lifecycle, worker and
+  artifact UI projection, telemetry/audit.
+- Project-local Hermes runtime: wrapper, parent mission, provider routing,
+  toolsets, delegation, memory/sessions, skills, cron, MCP manager.
+- Connection lanes: CUA proxy/daemon/host Mac, web/search, browser automation,
+  terminal/file/code, messaging/delivery, external MCP, isolated lanes, native
+  artifacts.
+
+The drawing is intentionally connection-aware instead of button-oriented. It
+shows that every supported connection flows through readiness/risk policy before
+Hermes sees the mission or AURA exposes a user action.
+
+```text
+User
+  |
+  | hotkey / menu bar / mic / future context trigger
+  v
+AURA Native Shell
+  |
+  | ContextSnapshot + CapabilityPlan + RiskPolicy + MissionEnvelope
+  v
+Hermes Parent Mission
+  |
+  | built-in toolsets + skills + MCP + provider routing + delegation
+  v
+Connections
+  |-- CUA Driver MCP proxy for host screen/app read and action
+  |-- web/search/extract providers
+  |-- browser automation providers
+  |-- terminal/file/code execution backends
+  |-- Apple/native app skills
+  |-- messaging/delivery platforms
+  |-- cron/scheduled tasks
+  |-- memory/session search
+  |-- external MCP servers
+  |-- future CUA Sandbox / CuaBot isolated desktops
+```
+
+## Core Product Surfaces
+
+### 1. Menu Bar Status
+
+Purpose: always-on presence and quick state.
+
+Must show:
+
+- idle/running/attention/error
+- active worker count
+- approval-needed count
+- setup-needed state if any required connection is broken
+
+Primary actions:
+
+- New Mission
+- Open Activity
+- Open Readiness
+- Cancel Mission
+
+### 2. Ambient Prompt
+
+MVP:
+
+- `⌃⌥⌘A` tap-to-open.
+- text input remains first-class.
+- voice is launched through Hermes Voice Mode, not an AURA transcription path.
+
+AURA should provide a native entry point into project-local Hermes voice mode
+and clear setup/status affordances. Hermes owns microphone recording, silence
+detection, speech-to-text, text-to-speech, continuous voice loop behavior, and
+voice configuration.
+
+### 3. Worker Stack
+
+Purpose: represent background work as visible objects.
+
+Required objects:
+
+- compact 2x2 worker palette for top active/recent workers
+- right-edge worker badge stack for all active/recent workers
+- hover card per worker
+- artifact actions on completed workers
+
+This is required for Clicky-style parity and also for trust.
+
+### 4. Activity View
+
+Purpose: drill-down for technical users and debugging.
+
+Keep:
+
+- current mission output
+- Hermes sessions
+- logs/status
+- approval history
+
+Do not make this the primary everyday product surface.
+
+### 5. Readiness Center
+
+Purpose: make supported connections explicit and self-healing.
+
+This replaces scattered setup messages with one capability map.
+
+Groups:
+
+- Runtime: Hermes, provider/model, local config, global symlink warning.
+- Host control: CUA install, daemon, Accessibility, Screen Recording, MCP.
+- Web/browser: web providers, browser automation, CDP/local browser.
+- Local work: terminal backend, file/code execution, sandbox backend.
+- Native apps/skills: Apple Reminders, Notes, iMessage, FindMy, Spotify.
+- Messaging/delivery: email/SMS/Slack/Discord/etc.
+- Memory/sessions: built-in memory, session search.
+- Scheduling: Hermes cron.
+- External MCP: each stdio/HTTP server.
+
+Each row should have:
+
+- status: ready, needs auth, needs permission, missing dependency, disabled,
+  degraded
+- risk tier
+- last checked
+- fix action
+- test action
+
+## Connection Registry Design
+
+Add a thin AURA-side registry. It is not a tool executor. It is a UI/readiness
+model derived from Hermes, CUA, config, and local probes.
+
+Suggested types:
+
+```swift
+struct AURAConnection: Identifiable {
+    let id: String
+    let title: String
+    let group: ConnectionGroup
+    let source: ConnectionSource
+    let capabilities: Set<CapabilityKind>
+    let riskTier: RiskTier
+    var status: ConnectionStatus
+    var setupAction: ConnectionSetupAction?
+    var testCommandShape: String?
+    var lastCheckedAt: Date?
+}
+
+enum CapabilityKind {
+    case contextRead
+    case hostControl
+    case webSearch
+    case browserAutomation
+    case localFileRead
+    case localFileWrite
+    case terminalExecution
+    case codeExecution
+    case appleAppControl
+    case messagingDelivery
+    case scheduling
+    case memory
+    case externalMCP
+    case artifactCreation
+}
+
+enum RiskTier {
+    case observe
+    case localDraft
+    case localWrite
+    case hostControl
+    case accountState
+    case externalSend
+    case spend
+    case credential
+    case regulated
+}
+```
+
+Initial registry should be built from:
+
+- `./script/aura-hermes status`
+- `./script/aura-hermes doctor`
+- `./script/aura-hermes mcp list`
+- `./script/aura-hermes mcp test cua-driver`
+- CUA passive permission checks
+- local config template presence
+
+Do not parse secrets or display secret values.
+
+## Mission Routing Design
+
+AURA should compute a `CapabilityPlan` before launching Hermes. The plan is
+advisory; Hermes still decides exact tool use.
+
+```text
+User goal
+  -> classify requested outcome
+  -> infer required capabilities
+  -> check connection readiness
+  -> choose safe toolset envelope
+  -> launch Hermes parent
+```
+
+Examples:
+
+| Mission | Required capabilities | Preferred route | Approval |
+|---|---|---|---|
+| "What is this panel?" | context read, CUA screenshot/window | Hermes + CUA read tools | none in Read Only |
+| "Clean my screenshots" | file ops, desktop context | Hermes + CUA read + terminal/file after approval | file move approval unless Always Allow |
+| "Find leads under 50k followers" | web/search/browser, artifact | Hermes web; browser fallback | write CSV approval |
+| "Set reminder" | Apple skill/native app | Hermes apple-reminders skill or CUA app action | required |
+| "Build a Spotify app" | terminal/file/code, Spotify optional | Hermes code/file/terminal; Spotify only if ready | write/build/open approval |
+| "Send this email" | doc read, messaging delivery | Hermes skills/messaging | always send approval |
+| "Schedule this every Friday" | cron | Hermes cronjob | approval if it acts externally later |
+
+Toolset policy:
+
+- Read Only: no terminal/file/browser action unless the toolset is safe for the
+  specific task. Keep CUA read-only.
+- Ask Per Task: start with read/context/research. Resume with action toolsets
+  only after one explicit approval.
+- Always Allow: allow local writes and host control, but hard-stop external
+  sends, posts, purchases, credentials, financial/legal/medical, and unrelated
+  foreground takeover.
+
+## Worker And Artifact State
+
+The MVP report says not to create a custom task database. That is correct for
+execution truth. AURA still needs a derived UI state model.
+
+Use Hermes sessions/delegation/process output as source of truth, but maintain a
+small UI projection:
+
+```swift
+struct WorkerRun: Identifiable {
+    let id: String
+    let parentMissionID: String
+    var hermesSessionID: String?
+    var title: String
+    var domain: WorkerDomain
+    var status: WorkerStatus
+    var latestAction: String
+    var commandSnippet: String?
+    var startedAt: Date
+    var endedAt: Date?
+    var artifacts: [AURAArtifact]
+    var needsApproval: ApprovalRequest?
+}
+
+struct AURAArtifact: Identifiable {
+    let id: String
+    let workerID: String
+    let path: String
+    let type: ArtifactType
+    let title: String
+    let createdAt: Date
+}
+```
+
+This model should be:
+
+- derived from Hermes output and known paths
+- small
+- safe to reconstruct
+- not a competing planner
+- not a source of truth for subagent execution
+
+## Connection Usage Policy
+
+### CUA Driver
+
+Use for:
+
+- visible app/window context
+- screen inspection
+- host app actions when explicitly approved
+- login/local state workflows only when needed
+
+Do not use for:
+
+- generic web scraping when Hermes web tools can do it
+- file generation that terminal/file tools can do
+- silent foreground takeover
+
+### Web
+
+Use Hermes programmatic web tools first for public research. If not configured,
+the readiness center must say which provider is missing. Browser/CUA fallback
+is only for logged-in, JS-heavy, or user-visible state.
+
+### Browser
+
+Use Hermes browser automation before CUA browser clicking when possible. Use
+local Chrome/CDP only when configured and when the task needs local session
+state. Account changes, submits, messages, purchases, uploads, deletes, or posts
+remain approval-gated.
+
+### Terminal/File/Code Execution
+
+Use for local builds, generated apps, reports, CSVs, docs, and repo tasks after
+policy permits. Prefer isolated terminal backends later for risky/untrusted
+code. Local terminal is powerful and should be transparent in worker cards.
+
+### Skills
+
+Use skills for repeatable domains instead of hardcoding app workflows:
+
+- Apple Reminders/Notes/iMessage/FindMy
+- Spotify
+- OCR/documents/PDF
+- Google Workspace
+- social URL analysis
+- software-dev helpers
+
+AURA's setup should test skill dependencies before marketing a workflow.
+
+### Messaging And Delivery
+
+Treat every delivery connection as high-risk. Drafting is allowed; sending is
+always approved by the user with recipient, channel, body, and side effects
+visible.
+
+### Cron/Scheduled Work
+
+Use Hermes cron rather than building an AURA scheduler. AURA should display
+scheduled jobs, pause/resume/edit/remove them, and surface delivery targets.
+Any scheduled job that can send/post/spend must require explicit setup-time and
+run-time approval rules.
+
+### Memory
+
+Use Hermes built-in memory for MVP. AURA can show memory status and session
+recovery but should not create a separate long-term memory system.
+
+### External MCP
+
+Use MCP for GitHub, databases, internal APIs, file systems, and third-party
+tools. AURA should not hand-code integrations when an MCP server exists. Each
+MCP server gets a readiness row and per-tool risk policy.
+
+### Isolated Lanes
+
+For risky computer-use or untrusted execution, prefer:
+
+- Hermes container/remote terminal backends: Docker, SSH, Singularity, Modal,
+  Daytona.
+- CUA Sandbox or CuaBot for isolated GUI work.
+
+Do not run risky exploratory tasks on the user's real desktop by default.
+
+## UI Flow
+
+### Default Mission
+
+1. User presses `⌃⌥⌘A`.
+2. Ambient prompt opens near cursor.
+3. AURA captures frontmost app, bundle id, pid, cursor position, project root.
+4. AURA computes capability/risk plan.
+5. If required capability is unavailable, prompt shows a short blocker and a
+   Readiness Center action.
+6. If available, AURA launches one Hermes parent mission.
+7. Worker placeholder appears immediately.
+8. Hermes output/delegation/tool signals update worker cards.
+9. Approval blocks attach to the relevant worker.
+10. Completion creates artifacts and follow-up actions.
+
+### Approval
+
+Approval copy must include:
+
+- action
+- target app/site/file/account/path
+- risk category
+- whether it is one-time or continuing
+- what remains blocked after approval
+
+Approval is not a dashboard-only concept. If a worker is blocked, the badge and
+hover card must show it.
+
+### Artifact Handoff
+
+Every artifact should have:
+
+- path
+- type
+- owning worker
+- open/reveal/continue action
+- safety policy for opening/running
+
+CSV opens in Numbers or default CSV app. Generated apps can launch only when
+policy permits or after approval. Reports/logs open read-only.
+
+## Dev Implementation Plan
+
+### Phase 1: Connection Registry And Readiness Center
+
+Files likely involved:
+
+- `Sources/AURA/Models/`
+- `Sources/AURA/Services/HermesService.swift`
+- `Sources/AURA/Services/CuaDriverService.swift`
+- `Sources/AURA/Stores/AURAStore.swift`
+- new `Sources/AURA/Views/ReadinessCenterView.swift`
+
+Tasks:
+
+1. Add connection/risk/status models.
+2. Parse bounded status from Hermes status/doctor and MCP list/test.
+3. Add readiness rows for Hermes, provider/model, CUA, web, browser, terminal,
+   skills, messaging, cron, memory, external MCP.
+4. Add test/fix actions where safe.
+5. Ensure no secrets are read into UI.
+
+Acceptance:
+
+- A developer can see that CUA is ready, web is missing keys, Spotify is blocked,
+  and messaging is unconfigured before launching a mission.
+
+### Phase 2: Capability Plan In Mission Envelope
+
+Files likely involved:
+
+- `Sources/AURA/Stores/AURAStore.swift`
+- `Sources/AURA/Models/AURAMission.swift`
+
+Tasks:
+
+1. Add lightweight mission classifier for required capabilities and risk.
+2. Include a capability/readiness summary in the mission envelope.
+3. Block or degrade missions when mandatory connections are unavailable.
+4. Keep Hermes as the final planner.
+
+Acceptance:
+
+- Web research says exactly why it cannot run if web providers are missing.
+- Native app control routes through CUA/skills only when ready.
+
+### Phase 3: WorkerRun Projection And Ambient Worker UI
+
+Files likely involved:
+
+- `Sources/AURA/Stores/AURAStore.swift`
+- `Sources/AURA/Views/CursorSurfaceView.swift`
+- new worker views/controllers
+
+Tasks:
+
+1. Add `WorkerRun` and `AURAArtifact` UI projection.
+2. Parse Hermes output for delegation/tool/process/progress/approval/artifact.
+3. Add worker palette, badge stack, and hover card.
+4. Attach approvals and artifacts to workers.
+
+Acceptance:
+
+- A delegated mission visibly shows multiple workers.
+- A blocked worker is obvious without opening the dashboard.
+- Completed workers expose artifacts.
+
+### Phase 4: Artifact Registry
+
+Tasks:
+
+1. Parse final packets and known output paths.
+2. Detect generated files in approved output directories.
+3. Add open/reveal/continue actions.
+4. Keep audit entries for local writes and launches.
+
+Acceptance:
+
+- CSV, generated app, folder, and report outputs are first-class UI objects.
+
+### Phase 5: Hermes Voice Mode Integration
+
+Tasks:
+
+1. Add an AURA action labeled "Open Hermes Voice Mode".
+2. Launch or foreground an interactive project-local Hermes surface through
+   `script/aura-hermes`, never a global Hermes install.
+3. Show setup hints and diagnostics for Hermes voice prerequisites:
+   `hermes-agent[voice]` dependencies, PortAudio, ffmpeg, `voice`, `stt`, and
+   `tts` config in `.aura/hermes-home/config.yaml`.
+4. Prefer Hermes local STT with `faster-whisper` when available, since it needs
+   no API key. Cloud STT/TTS providers remain Hermes configuration.
+5. Link the user to Hermes voice commands: `/voice on`, `/voice off`,
+   `/voice tts`, `/voice status`, and configurable `voice.record_key`.
+
+Acceptance:
+
+- Hermes voice mode opens from AURA using the project-local runtime.
+- `/voice status` works in the launched Hermes surface.
+- AURA does not capture, transcribe, store, or score audio/transcripts itself.
+- AURA does not request macOS microphone permission directly unless a future
+  Hermes-supported embedded UI requires it.
+
+### Phase 6: Connection Packs
+
+Implement and test in this order:
+
+1. Host context pack: CUA read and action gates.
+2. Local artifact pack: terminal/file/code execution for outputs.
+3. Web research pack: web provider or browser fallback with clear setup.
+4. Apple app pack: Reminders/Notes/iMessage/FindMy dependencies and approvals.
+5. Messaging pack: draft/send approval for email/SMS/Slack/etc.
+6. Schedule pack: Hermes cron create/list/pause/resume/edit.
+7. External MCP pack: GitHub or filesystem MCP as first non-CUA example.
+
+## Issue Breakdown
+
+Create issues in this order:
+
+1. `connections: add AURAConnection registry models`
+2. `connections: parse Hermes status/doctor into readiness rows`
+3. `connections: parse MCP list/test and CUA tool availability`
+4. `ui: add Readiness Center`
+5. `mission: add capability/risk plan to mission envelope`
+6. `mission: degrade/block unavailable capabilities with actionable copy`
+7. `workers: add WorkerRun and AURAArtifact projection models`
+8. `workers: parse Hermes delegation/tool/process/progress signals`
+9. `ui: add ambient worker palette and badge stack`
+10. `ui: add worker hover card and attached approval card`
+11. `artifacts: add artifact registry and open/reveal/continue actions`
+12. `web: add web provider readiness and research smoke test`
+13. `browser: add browser/CDP readiness and fallback policy`
+14. `skills: verify Apple Reminders/Notes skill dependencies`
+15. `voice: add Hermes Voice Mode launcher`
+16. `messaging: add draft/send approval contract`
+17. `cron: expose Hermes scheduled jobs read/manage UI`
+18. `mcp: add first external MCP readiness row beyond CUA`
+19. `qa: add connection matrix smoke tests`
+20. `packaging: carry registry/readiness into standalone bootstrap`
+
+## Verification Matrix
+
+### Connection readiness
+
+- Hermes provider/model ready.
+- CUA ready and MCP registered.
+- CUA read-only tools discovered in Read Only.
+- CUA action tools discovered only after policy allows actions.
+- Web reports ready or exact missing provider keys.
+- Browser reports ready or exact missing dependency.
+- Skills reports installed and dependency status for Apple Reminders at minimum.
+- Messaging reports unconfigured until credentials are present.
+- Cron jobs list works even when there are zero jobs.
+
+### Mission behavior
+
+- Observe current app without approval.
+- Web research either succeeds or shows missing web provider.
+- Desktop cleanup requests approval before moving files.
+- Apple Reminders requests approval before state change.
+- Generated app writes only after approval and returns artifact path.
+- Messaging drafts without sending, then asks before send.
+- Scheduled job creation asks for confirmation if it will act later.
+- Delegated research shows multiple workers.
+
+### Safety
+
+- Read Only cannot see or call CUA action tools.
+- Ask Per Task cannot call CUA action tools before `NEEDS_APPROVAL`.
+- Always Allow still stops for external sends/posts/purchases/credentials.
+- Audit ledger does not store screenshots or prompt text.
+- Cancel stops the active parent mission.
+- Timeout does not orphan a visible worker.
+
+## Design Non-Goals
+
+Do not build:
+
+- custom Swift agent planner
+- custom browser automation
+- custom long-term memory
+- custom scheduler
+- custom speech-to-text or text-to-speech pipeline
+- Apple Speech or AVFoundation transcription layer
+- duplicate voice session state outside Hermes
+- separate per-connector chat screens
+- hardcoded Figma/TikTok/Clicky demo buttons
+- direct Swift calls to CUA action APIs during missions
+- global Hermes dependency
+- broad external-send automation without approval
+
+## Final Recommendation
+
+The most optimal AURA design is a native Mac trust shell around Hermes, not a
+feature-by-feature clone of any one demo.
+
+Use all supported connections through one capability registry and one mission
+pipeline. The user sees a simple ambient command surface, visible workers,
+clear approvals, and concrete artifacts. Hermes sees a precise mission envelope
+with context, policy, readiness, and toolsets. CUA and every other connection
+remain behind explicit readiness and risk boundaries.
+
+Build in this order:
+
+```text
+Connection Registry
+  -> Capability Plan
+  -> Worker UI
+  -> Artifact Handoff
+  -> Voice
+  -> Connection Packs
+  -> Standalone Bootstrap
+```
+
+This keeps the app lean, unlocks the full Hermes/CUA ecosystem, and gives the
+dev team a stable architecture for both repo-backed MVP and external beta.
