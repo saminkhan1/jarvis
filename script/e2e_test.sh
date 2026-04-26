@@ -90,6 +90,18 @@ assert_matches() {
   fi
 }
 
+assert_not_contains() {
+  local haystack="$1"
+  local needle="$2"
+  local label="$3"
+
+  if [[ "$haystack" == *"$needle"* ]]; then
+    printf "Expected %s to not contain %q\n" "$label" "$needle" >&2
+    printf "%s\n" "$haystack" >&2
+    exit 1
+  fi
+}
+
 session_id_from() {
   awk -F': *' 'tolower($1) == "session_id" { print $2; exit }' "$1"
 }
@@ -170,11 +182,18 @@ cua_mcp="$(<"$TMP_DIR/cua-mcp.txt")"
 assert_contains "$cua_mcp" "Connected" "CUA MCP test output"
 assert_contains "$cua_mcp" "Tools discovered" "CUA MCP test output"
 assert_contains "$cua_mcp" "script/aura-cua-mcp" "CUA MCP test output"
-run_capture "$TMP_DIR/cua-mcp-write.txt" \
-  env AURA_AUTOMATION_POLICY=writeAlways AURA_CUA_ALLOW_ACTIONS=1 "$HERMES" mcp test cua-driver
-cua_mcp_write="$(<"$TMP_DIR/cua-mcp-write.txt")"
-assert_contains "$cua_mcp_write" "click" "write-mode CUA MCP test output"
-assert_contains "$cua_mcp_write" "type_text" "write-mode CUA MCP test output"
+
+run_capture "$TMP_DIR/hermes-tools.txt" "$HERMES" tools list --platform cli
+hermes_tools="$(<"$TMP_DIR/hermes-tools.txt")"
+assert_contains "$hermes_tools" "cua-driver  [include only:" "Hermes registered tool surface"
+assert_contains "$hermes_tools" "check_permissions" "Hermes registered tool surface"
+assert_contains "$hermes_tools" "screenshot" "Hermes registered tool surface"
+assert_not_contains "$hermes_tools" "type_text" "Hermes registered tool surface"
+assert_not_contains "$hermes_tools" "click" "Hermes registered tool surface"
+assert_contains "$(<"$ROOT_DIR/config/hermes-default.yaml")" "tools:" "Hermes CUA config template"
+assert_contains "$(<"$ROOT_DIR/config/hermes-default.yaml")" "include:" "Hermes CUA config template"
+assert_contains "$(<"$ROOT_DIR/config/hermes-default.yaml")" "check_permissions" "Hermes CUA config template"
+assert_contains "$(<"$ROOT_DIR/config/hermes-default.yaml")" "screenshot" "Hermes CUA config template"
 
 section "Real quiet mission"
 run_capture "$TMP_DIR/mission.txt" \

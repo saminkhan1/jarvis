@@ -49,7 +49,20 @@ memory:
 mcp_servers:
   cua-driver:
     command: "${AURA_PROJECT_ROOT}/script/aura-cua-mcp"
-    env:
-      AURA_AUTOMATION_POLICY: "${AURA_AUTOMATION_POLICY}"
-      AURA_CUA_ALLOW_ACTIONS: "${AURA_CUA_ALLOW_ACTIONS}"
+    tools:
+      include:
+        - check_permissions
+        - get_accessibility_tree
+        - get_agent_cursor_state
+        - get_config
+        - get_cursor_position
+        - get_recording_state
+        - get_screen_size
+        - get_window_state
+        - list_apps
+        - list_windows
+        - screenshot
+        - zoom
+      prompts: false
+      resources: false
     enabled: true

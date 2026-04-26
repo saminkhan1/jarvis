@@ -25,21 +25,6 @@ SOCKET_PATH = os.path.expanduser(
     )
 )
 
-READ_ONLY_TOOLS = {
-    "check_permissions",
-    "get_accessibility_tree",
-    "get_agent_cursor_state",
-    "get_config",
-    "get_cursor_position",
-    "get_recording_state",
-    "get_screen_size",
-    "get_window_state",
-    "list_apps",
-    "list_windows",
-    "screenshot",
-    "zoom",
-}
-
 TRUTHY = {"1", "true", "yes", "y", "on"}
 _PROXY_STARTED_AT = time.monotonic()
 
@@ -157,35 +142,6 @@ def tool_result_error(text: str) -> dict[str, Any]:
     }
 
 
-def policy() -> str:
-    return os.environ.get("AURA_AUTOMATION_POLICY", "readOnly")
-
-
-def action_tools_allowed() -> bool:
-    return os.environ.get("AURA_CUA_ALLOW_ACTIONS", "").lower() in TRUTHY
-
-
-def tool_allowed(name: str) -> bool:
-    if name in READ_ONLY_TOOLS:
-        return True
-    if policy() == "writeAlways":
-        return True
-    if policy() == "writePerTask" and action_tools_allowed():
-        return True
-    return False
-
-
-def policy_block_result(name: str) -> dict[str, Any]:
-    if policy() == "readOnly":
-        return tool_result_error(
-            f"AURA_CUA_READ_ONLY: CUA tool '{name}' is blocked in Read Only mode."
-        )
-    return tool_result_error(
-        "AURA_CUA_ACTION_REQUIRES_APPROVAL: Return NEEDS_APPROVAL before using "
-        f"CUA action tool '{name}'."
-    )
-
-
 def permissions_ready() -> bool:
     response = call_daemon(
         {"method": "call", "name": "check_permissions", "args": {"prompt": False}}
@@ -238,45 +194,25 @@ def list_tools() -> dict[str, Any]:
         )
         return {"tools": []}
 
-    allowed = [sanitize_tool(tool) for tool in tools if tool_allowed(str(tool.get("name", "")))]
+    forwarded = [sanitize_tool(tool) for tool in tools]
     telemetry_log(
         "user.info",
         "cua_tools_list_finish",
         status="ok",
-        allowed_count=len(allowed),
         total_count=len(tools),
-        policy=policy(),
-        actions_allowed=action_tools_allowed(),
+        forwarded_count=len(forwarded),
         duration_ms=duration_ms(started_at),
     )
-    return {"tools": allowed}
+    return {"tools": forwarded}
 
 
 def call_tool(name: str, args: dict[str, Any]) -> dict[str, Any]:
     started_at = time.monotonic()
-    current_policy = policy()
-    actions_allowed = action_tools_allowed()
-    allowed = tool_allowed(name)
     telemetry_log(
         "user.info",
         "cua_tool_call_start",
         tool_name=name,
-        policy=current_policy,
-        actions_allowed=actions_allowed,
-        allowed=allowed,
     )
-
-    if not tool_allowed(name):
-        telemetry_log(
-            "user.warning",
-            "cua_tool_call_finish",
-            tool_name=name,
-            status="policy_blocked",
-            policy=current_policy,
-            actions_allowed=actions_allowed,
-            duration_ms=duration_ms(started_at),
-        )
-        return policy_block_result(name)
 
     if name == "check_permissions":
         args = {}
@@ -290,8 +226,6 @@ def call_tool(name: str, args: dict[str, Any]) -> dict[str, Any]:
                 tool_name=name,
                 status="daemon_unavailable",
                 phase="permission_check",
-                policy=current_policy,
-                actions_allowed=actions_allowed,
                 error_type=type(exc).__name__,
                 duration_ms=duration_ms(started_at),
             )
@@ -303,8 +237,6 @@ def call_tool(name: str, args: dict[str, Any]) -> dict[str, Any]:
                 "cua_tool_call_finish",
                 tool_name=name,
                 status="setup_required",
-                policy=current_policy,
-                actions_allowed=actions_allowed,
                 duration_ms=duration_ms(started_at),
             )
             return tool_result_error(
@@ -320,8 +252,6 @@ def call_tool(name: str, args: dict[str, Any]) -> dict[str, Any]:
             "cua_tool_call_finish",
             tool_name=name,
             status="daemon_unavailable",
-            policy=current_policy,
-            actions_allowed=actions_allowed,
             error_type=type(exc).__name__,
             duration_ms=duration_ms(started_at),
         )
@@ -333,8 +263,6 @@ def call_tool(name: str, args: dict[str, Any]) -> dict[str, Any]:
             "cua_tool_call_finish",
             tool_name=name,
             status="daemon_error",
-            policy=current_policy,
-            actions_allowed=actions_allowed,
             duration_ms=duration_ms(started_at),
         )
         return tool_result_error(f"AURA_CUA_DAEMON_ERROR: {response.get('error', 'unknown error')}")
@@ -346,8 +274,6 @@ def call_tool(name: str, args: dict[str, Any]) -> dict[str, Any]:
             "cua_tool_call_finish",
             tool_name=name,
             status="malformed_response",
-            policy=current_policy,
-            actions_allowed=actions_allowed,
             duration_ms=duration_ms(started_at),
         )
         return tool_result_error("AURA_CUA_DAEMON_ERROR: malformed Cua Driver response")
@@ -357,8 +283,6 @@ def call_tool(name: str, args: dict[str, Any]) -> dict[str, Any]:
         "cua_tool_call_finish",
         tool_name=name,
         status="ok",
-        policy=current_policy,
-        actions_allowed=actions_allowed,
         duration_ms=duration_ms(started_at),
     )
     return payload
@@ -421,8 +345,6 @@ def main() -> int:
         "user.info",
         "cua_proxy_start",
         socket_path_kind=socket_path_kind,
-        policy=policy(),
-        actions_allowed=action_tools_allowed(),
         duration_ms=duration_ms(_PROXY_STARTED_AT),
     )
 

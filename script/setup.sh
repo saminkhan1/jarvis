@@ -271,6 +271,133 @@ seed_templates() {
   fi
 }
 
+migrate_cua_mcp_config() {
+  section "CUA MCP Hermes config"
+
+  local config_target="$HERMES_HOME/config.yaml"
+  local hermes_python="$HERMES_AGENT_DIR/venv/bin/python3"
+  [[ -x "$hermes_python" ]] || hermes_python="$HERMES_AGENT_DIR/venv/bin/python"
+
+  if [[ ! -f "$config_target" ]]; then
+    warn "$config_target is missing; setup will create it before migration"
+    return
+  fi
+
+  if [[ "$CHECK_ONLY" == "1" ]]; then
+    if grep -q "AURA_AUTOMATION_POLICY\\|AURA_CUA_ALLOW_ACTIONS" "$config_target"; then
+      warn "CUA MCP config still uses old AURA env policy gates; run ./script/setup.sh to migrate to Hermes tools.include"
+      return
+    fi
+
+    if grep -q "script/aura-cua-mcp" "$config_target" && grep -q "include:" "$config_target"; then
+      ok "CUA MCP tool exposure is configured in Hermes"
+    else
+      warn "CUA MCP tool exposure should be configured with mcp_servers.cua-driver.tools.include"
+    fi
+    return
+  fi
+
+  if [[ ! -x "$hermes_python" ]]; then
+    warn "Hermes Python is missing; skipping CUA MCP config migration"
+    return
+  fi
+
+  local migration_output
+  if migration_output="$("$hermes_python" - "$config_target" <<'PY'
+import sys
+
+import yaml
+
+path = sys.argv[1]
+read_tools = [
+    "check_permissions",
+    "get_accessibility_tree",
+    "get_agent_cursor_state",
+    "get_config",
+    "get_cursor_position",
+    "get_recording_state",
+    "get_screen_size",
+    "get_window_state",
+    "list_apps",
+    "list_windows",
+    "screenshot",
+    "zoom",
+]
+
+with open(path, "r", encoding="utf-8") as fh:
+    config = yaml.safe_load(fh) or {}
+
+if not isinstance(config, dict):
+    raise SystemExit("config root is not a mapping")
+
+servers = config.setdefault("mcp_servers", {})
+if not isinstance(servers, dict):
+    servers = {}
+    config["mcp_servers"] = servers
+
+server = servers.setdefault("cua-driver", {})
+if not isinstance(server, dict):
+    server = {}
+    servers["cua-driver"] = server
+
+changed = False
+
+command = "${AURA_PROJECT_ROOT}/script/aura-cua-mcp"
+if server.get("command") != command:
+    server["command"] = command
+    changed = True
+
+env = server.get("env")
+if isinstance(env, dict):
+    for key in ("AURA_AUTOMATION_POLICY", "AURA_CUA_ALLOW_ACTIONS"):
+        if key in env:
+            env.pop(key, None)
+            changed = True
+    if not env:
+        server.pop("env", None)
+        changed = True
+elif env is not None:
+    server.pop("env", None)
+    changed = True
+
+tools = server.get("tools")
+if not isinstance(tools, dict):
+    tools = {}
+    server["tools"] = tools
+    changed = True
+
+if not tools.get("include"):
+    tools["include"] = read_tools
+    changed = True
+
+for key in ("prompts", "resources"):
+    if tools.get(key) is not False:
+        tools[key] = False
+        changed = True
+
+if server.get("enabled") is not True:
+    server["enabled"] = True
+    changed = True
+
+if changed:
+    with open(path, "w", encoding="utf-8") as fh:
+        yaml.safe_dump(config, fh, sort_keys=False, allow_unicode=True)
+    print("migrated")
+else:
+    print("unchanged")
+PY
+  )"; then
+    if [[ "$migration_output" == "migrated" ]]; then
+      ok "Migrated CUA MCP exposure into Hermes tools.include"
+    else
+      ok "CUA MCP exposure already lives in Hermes config"
+    fi
+  else
+    warn "Could not migrate CUA MCP config."
+    printf "%s\n" "$migration_output" >&2
+  fi
+}
+
 check_wrapper() {
   section "AURA Hermes wrapper"
 
@@ -379,6 +506,7 @@ main() {
   ensure_hermes_checkout
   ensure_hermes_venv
   seed_templates
+  migrate_cua_mcp_config
   check_wrapper
   check_cua
   print_next_steps
