@@ -87,10 +87,11 @@ fi
 if [[ ! -x "$HERMES_PYTHON" ]]; then
   telemetry_log user.err hermes_wrapper_missing_python path_kind=project_local_hermes_python
   echo "Missing project-local Hermes Python at $HERMES_AGENT_DIR/venv/bin/python3" >&2
-  echo "Run: .aura/hermes-agent/setup-hermes.sh" >&2
+  echo "Run: cd \"$ROOT_DIR\" && ./script/setup.sh" >&2
   exit 127
 fi
 
+export AURA_PROJECT_ROOT="$ROOT_DIR"
 export HOME="$ROOT_DIR/.aura/home"
 export HERMES_HOME="$ROOT_DIR/.aura/hermes-home"
 export VIRTUAL_ENV="$HERMES_AGENT_DIR/venv"

@@ -1,0 +1,55 @@
+# AURA repo-backed Hermes configuration template.
+#
+# script/setup.sh copies this file to .aura/hermes-home/config.yaml only when
+# that local file does not already exist. Edit the copied file, not this
+# template, for machine-specific provider/model choices.
+
+model:
+  # Validate the configured provider/model with:
+  #   ./script/aura-hermes doctor
+  #   ./script/aura-hermes chat -Q --source aura-setup -q "Reply exactly: AURA OK"
+  default: gpt-5.4
+  provider: openai-codex
+  base_url: https://openrouter.ai/api/v1
+
+terminal:
+  backend: local
+  cwd: .
+  timeout: 180
+  lifetime_seconds: 300
+  docker_mount_cwd_to_workspace: false
+  persistent_shell: true
+
+agent:
+  max_turns: 60
+  api_max_retries: 3
+  reasoning_effort: medium
+  verbose: false
+
+display:
+  streaming: true
+  final_response_markdown: strip
+  show_reasoning: false
+  tool_progress: new
+
+tool_output:
+  max_bytes: 50000
+  max_lines: 2000
+  max_line_length: 2000
+
+compression:
+  enabled: true
+  threshold: 0.5
+  target_ratio: 0.2
+  protect_last_n: 20
+
+memory:
+  provider: builtin
+
+mcp_servers:
+  cua-driver:
+    command: "${AURA_PROJECT_ROOT}/script/aura-cua-mcp"
+    env:
+      AURA_AUTOMATION_POLICY: "${AURA_AUTOMATION_POLICY}"
+      AURA_CUA_ALLOW_ACTIONS: "${AURA_CUA_ALLOW_ACTIONS}"
+    enabled: true

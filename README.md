@@ -7,24 +7,71 @@ AURA is a native macOS ambient assistant shell, not a chatbot. It is the menu ba
 - Local runtime: Hermes lives under `.aura/` and is invoked only through `script/aura-hermes`
 - Control lane: Cua Driver is required for host interaction and stays approval-gated
 
-## Quick Start
+## MVP Launch Status
 
-```bash
-./script/build_and_run.sh
-```
+AURA is currently a repo-backed technical MVP. Testers should clone this repo,
+run the setup script, and launch through the project scripts.
+
+`dist/AURA.app` is a local ad-hoc signed development artifact. It is not a
+Developer ID signed, notarized, stapled, standalone beta build yet.
+
+## Fresh Clone Quick Start
+
+1. Set up the repo-local runtime:
+
+   ```bash
+   ./script/setup.sh
+   ```
+
+2. Configure the model provider and credentials if `doctor` reports setup work:
+
+   ```bash
+   ./script/aura-hermes setup
+   ```
+
+   Secrets belong in `.aura/hermes-home/.env`. Provider/model config belongs in
+   `.aura/hermes-home/config.yaml`. The setup script seeds both files from
+   checked-in templates only when they are missing.
+
+3. Confirm Cua Driver is installed, daemonized, permissioned, and visible to
+   Hermes:
+
+   ```bash
+   /Applications/CuaDriver.app/Contents/MacOS/cua-driver status
+   /Applications/CuaDriver.app/Contents/MacOS/cua-driver call check_permissions '{"prompt":false}'
+   ./script/aura-hermes mcp list
+   ```
+
+4. Run the launch gates:
+
+   ```bash
+   ./script/aura-hermes doctor
+   ./script/e2e_test.sh
+   ./script/build_and_run.sh --verify
+   ```
+
+5. Launch AURA:
+
+   ```bash
+   ./script/build_and_run.sh
+   ```
 
 ## Verify
 
 ```bash
-./script/build_and_run.sh --verify
+./script/setup.sh --check
+./script/aura-hermes doctor
 ./script/e2e_test.sh
+./script/build_and_run.sh --verify
 ```
 
 ## Useful Commands
 
 ```bash
+./script/setup.sh --check
 ./script/aura-hermes doctor
 ./script/aura-hermes status
+./script/aura-hermes mcp list
 ./script/aura-logs stream
 ./script/aura-logs audit
 ```
@@ -48,4 +95,6 @@ AURA is a native macOS ambient assistant shell, not a chatbot. It is the menu ba
 - `script/` runtime wrappers and diagnostics
 - `docs/` beta and integration notes
 
-For deeper integration details, see `docs/INTEGRATION_NOTES.md` and `docs/BETA_READINESS.md`.
+For the launch source of truth and deeper integration details, see
+`docs/AURA_MVP_FINAL_EXECUTION_REPORT.md`, `docs/INTEGRATION_NOTES.md`,
+`docs/BETA_READINESS.md`, and `docs/AURA_MAIN_APPLICABILITY.md`.

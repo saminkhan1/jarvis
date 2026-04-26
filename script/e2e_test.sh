@@ -104,6 +104,20 @@ run_capture "$TMP_DIR/version.txt" "$HERMES" version
 version_output="$(<"$TMP_DIR/version.txt")"
 assert_contains "$version_output" "Project: $ROOT_DIR/.aura/hermes-agent" "Hermes version output"
 
+section "Repo-backed launch templates"
+if [[ ! -f "$ROOT_DIR/config/hermes-default.yaml" ]]; then
+  printf "Missing config template: %s\n" "$ROOT_DIR/config/hermes-default.yaml" >&2
+  exit 1
+fi
+
+if [[ ! -f "$ROOT_DIR/.env.example" ]]; then
+  printf "Missing environment template: %s\n" "$ROOT_DIR/.env.example" >&2
+  exit 1
+fi
+
+assert_contains "$(<"$ROOT_DIR/config/hermes-default.yaml")" 'command: "${AURA_PROJECT_ROOT}/script/aura-cua-mcp"' "Hermes config template"
+assert_contains "$(<"$ROOT_DIR/.env.example")" "OPENAI_API_KEY" "environment template"
+
 section "Hermes status"
 run_capture "$TMP_DIR/status.txt" "$HERMES" status
 status_output="$(<"$TMP_DIR/status.txt")"
