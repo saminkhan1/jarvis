@@ -41,13 +41,14 @@ Current AURA strengths:
   panel.
 - Project-local Hermes boundary through `script/aura-hermes`.
 - CUA Driver readiness gate and daemon-backed MCP proxy.
-- Read Only, Ask Per Task, and Always Allow policy modes.
+- Hermes-configured tool exposure and approval behavior.
 - Streaming mission output, cancel, timeout, approval parsing, resume, sessions,
   telemetry, and audit ledger.
 
 Current AURA non-goals or gaps versus the demo:
 
-- No voice input yet.
+- Voice opens project-local Hermes Voice Mode; AURA does not implement native
+  microphone capture or transcription.
 - No hold-to-talk lifecycle.
 - No consumer standalone install, signing, notarization, or first-run runtime
   bootstrap.
@@ -221,31 +222,24 @@ The app should always be in one of these user-visible states:
 | State | Menu bar | Prompt | Worker UI | User expectation |
 |---|---|---|---|---|
 | Idle | Neutral icon. | Hidden. | Hidden or faded recent completions. | AURA is available but doing nothing. |
-| Listening | Mic/listening affordance. | Visible with waveform or recording indicator. | Existing workers remain visible. | Speech is being captured. |
-| Reviewing transcript | Attention state. | Shows transcript and submit/edit controls. | Existing workers remain visible. | User can correct risky/low-confidence voice input. |
+| Listening | Hermes CLI voice surface. | Terminal/TUI owned by Hermes. | Existing workers remain visible in AURA. | Hermes is capturing speech. |
+| Reviewing transcript | Hermes voice loop. | Transcript handling stays inside Hermes. | Existing workers remain visible in AURA. | Hermes feeds the normal agent pipeline. |
 | Submitting | Busy state. | Disabled composer with spinner. | New pending worker may appear. | Mission is being handed to Hermes. |
 | Running | Active/ring state. | Usually hidden after submit. | Palette and badge stack visible. | Work continues in background. |
 | Needs approval | Attention state. | Approval visible if focused. | Relevant worker badge/card pulses or highlights. | User action is required before continuing. |
 | Completed | Done state briefly. | Hidden unless opened. | Completed worker becomes artifact shortcut. | Output is ready. |
 | Failed | Error state. | Optional retry prompt. | Failed worker is visible with reason. | User can inspect and retry. |
 
-### Primary Flow: Voice Mission
+### Primary Flow: Hermes Voice Mission
 
 1. User invokes AURA by hotkey, menu-bar action, or mic control.
-2. Ambient prompt appears without taking over the screen.
-3. If voice mode is active, prompt enters `Listening`:
-   - show mic icon/state
-   - show live waveform or recording timer
-   - keep existing workers visible
-4. On stop, AURA transcribes audio.
-5. If transcript confidence is acceptable and the task is low risk, submit
-   directly. If confidence is low or the task touches files/apps/accounts, show
-   the transcript in `Reviewing transcript` with edit and submit controls.
-6. On submit, create a parent mission and immediately show a pending worker
-   placeholder so the user sees continuity from command to background work.
-7. When Hermes emits the first concrete delegation/tool/process event, replace
-   the placeholder with the real worker title, icon, status, and latest action.
-8. Hide the prompt after submit unless approval is needed.
+2. AURA opens or foregrounds project-local Hermes through `script/aura-hermes`.
+3. User runs `/voice status`, `/voice on`, `/voice off`, or `/voice tts` inside
+   Hermes.
+4. Hermes owns microphone capture, silence detection, STT, TTS, and transcript
+   routing into the normal agent pipeline.
+5. AURA continues to show mission/workers/artifacts from Hermes output and
+   sessions when launched through AURA surfaces.
 
 ### Primary Flow: Text Mission
 
@@ -256,8 +250,9 @@ The app should always be in one of these user-visible states:
 5. Worker palette and badge stack show the mission/worker lifecycle exactly as
    in the voice flow.
 
-Text and voice must converge into the same mission pipeline after transcription.
-Do not create separate agent runtimes or separate policy paths.
+Text missions launch from AURA; voice missions launch from Hermes Voice Mode.
+Do not create an AURA-native audio runtime, transcript confidence classifier,
+or separate policy path.
 
 ### Worker Creation Flow
 
@@ -564,31 +559,25 @@ Acceptance:
   distinction without relying on free-form transcript text.
 - The parent mission remains cancellable and auditable.
 
-### Phase 3: Voice-First Invocation
+### Phase 3: Hermes Voice Mode Invocation
 
 Timeline: 1-2 weeks.
 
 The reference demo is voice-led. AURA can keep text input, but parity requires a
-native microphone path.
+reliable way to enter Hermes Voice Mode.
 
 Deliverables:
 
-- Add a microphone button to the ambient prompt.
-- Add push-to-talk from the prompt; global hold-to-talk can come after the
-  first voice path is reliable.
-- Transcribe into the same mission composer used by text.
-- Show the transcript before submit when confidence is low or the mission is
-  risky.
-- Route voice missions through the same policy and approval system as typed
-  missions.
-- Decide whether MVP uses Apple Speech, local faster-whisper, or Hermes voice
-  plumbing; keep the runtime project-local and documented.
+- Add "Open Hermes Voice Mode" in AURA.
+- Launch project-local Hermes through `script/aura-hermes`, never global Hermes.
+- Show Hermes voice setup/status hints sourced from `check_voice_requirements`.
+- Keep microphone capture, transcription, TTS, record key, and continuous voice
+  loop inside Hermes.
 
 Acceptance:
 
-- User can complete at least the Desktop cleanup and Reminders demo prompts by
-  voice.
-- Voice does not bypass approval gates.
+- `/voice status` and Hermes `check_voice_requirements` report readiness.
+- Voice does not bypass Hermes approval gates.
 - Text fallback remains available.
 
 ### Phase 4: Demo Task Parity
@@ -677,7 +666,7 @@ Deliverables:
   - browser/CDP availability
   - Spotify dependency status
 - Recovery copy for each missing dependency.
-- Keep Read Only as the default posture for broad testers.
+- Keep Hermes configured with conservative tool exposure for broad testers.
 - Preserve hard approval gates for sends, posts, purchases, credentials,
   financial actions, and external-contact workflows.
 - Keep audit ledger entries for every host-control and file-write action.
@@ -736,12 +725,12 @@ Legend:
 | Area | Demo behavior | AURA status | Launch check |
 |---|---|---|---|
 | Hotkey ambient entry | Agent is available from the Mac desktop. | Partial. AURA has `Ctrl+Option+Cmd+A` and cursor panel. | Required: keep hotkey/panel stable and verified with `build_and_run.sh --verify`. |
-| Voice invocation | User speaks every mission. | Missing. Docs explicitly say voice is not built. | Should: add microphone button and speech-to-text before marketing voice-first. Keep text fallback. |
+| Voice invocation | User speaks every mission. | Hermes Voice Mode launcher/status is in progress. | Should: open project-local Hermes Voice Mode and verify `/voice status`; do not build AURA-native STT. |
 | Hold-to-talk | Demo feels push-to-talk/always ready. | Missing. Current hotkey is tap-to-open. | Later: implement only after global key-up tracking is tested. |
 | Agent spawning | User says "agent" and multiple background agents run. | Backend strong. Hermes `delegate_task` supports isolated child agents and parallel batches; AURA launches one parent mission. | Required: prove delegation through AURA and surface delegated progress clearly enough in mission output. |
 | Per-agent visibility | Demo shows/mentions hoverable agent state. | Backend partial, UI missing. Hermes has CLI tree/gateway progress; AURA has no per-worker cards. | Should: add compact worker/progress summaries from Hermes output/session data before a polished public demo. |
 | Ambient worker stack | Demo has colored stacked worker badges and hover detail cards. | Missing. AURA has one cursor bubble and dashboard output. | Should: for MVP, parse worker states into a compact list; for consumer beta, add ambient worker badges. |
-| Desktop cleanup | Agent cleans screenshots into a Desktop folder. | Architecturally possible through CUA/Hermes, approval-gated. | Required: add an acceptance test/manual script for "organize visible Desktop screenshots" in Ask Per Task and Always Allow. |
+| Desktop cleanup | Agent cleans screenshots into a Desktop folder. | Architecturally possible through CUA/Hermes, approval-gated. | Required: add an acceptance test/manual script for "organize visible Desktop screenshots" under conservative and local-write Hermes configs. |
 | Native Apple apps | Agent sets a Reminders item. | Backend strong but dependency-sensitive. Skills Hub lists built-in Apple Notes/Reminders/FindMy/iMessage skills; CUA is also available. | Required: verify Apple Reminders skill/dependency path locally and gate state-changing native actions. |
 | Web research | Agent researches Instagram micro-influencers. | Backend strong, local setup partial. Hermes supports web search/extract and browser automation; local doctor reports missing optional web API keys. | Required: configure at least one reliable web/research path or make the limitation explicit in setup. |
 | Logged-in/social surfaces | Agent inspects Instagram in Chrome. | Backend strong but risky. Hermes browser supports local Chrome/CDP and browser sessions; CUA can inspect host state. | Should: gate account-state changes and messaging; research/read-only is okay, outreach is approval-only. |
@@ -751,7 +740,7 @@ Legend:
 | Native app control | Demo app controls Spotify. | Backend possible. Skills Hub lists built-in Spotify skill; local doctor says Spotify system dependency not met. | Later: keep this as an example output until local Spotify auth/dependency checks pass. |
 | Skills / reusable workflows | Demo implies repeated categories: desktop, Apple apps, research, app building. | Backend strong. Hermes skills are built-in, hub-installable, and agent-managed. | Required: verify that AURA launches Hermes with `skills` enabled and setup docs explain where skill dependencies live. |
 | Zero setup | Demo says built for consumers, no setup. | Not ready. AURA is repo-backed technical MVP. | Required: position launch as technical MVP only. External beta needs standalone runtime, signing, notarization, and first-run bootstrap. |
-| Safety posture | Demo shows powerful background actions. | Strong. AURA has policy modes, approvals, audit, and CUA gating. | Required: keep Read Only default and verify approval gates for writes, host control, sends, posts, purchases, credentials, and financial actions. |
+| Safety posture | Demo shows powerful background actions. | Strong. AURA defers tool exposure to Hermes config and still surfaces approvals, audit, and CUA gating. | Required: keep conservative Hermes defaults and verify approval gates for writes, host control, sends, posts, purchases, credentials, and financial actions. |
 | Mission cancel/timeout | Not highlighted in demo. | Present. Cancel and 300s timeout exist. | Required: keep e2e coverage passing and document timeout behavior. |
 | Onboarding/recovery | Demo implies no setup friction. | Partial. CUA gate is clear; Hermes/provider setup is still technical. | Required: improve recovery copy for missing Hermes auth/API/web tools before inviting non-core testers. |
 

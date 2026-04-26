@@ -152,6 +152,8 @@ enum AURATelemetry {
         case shellCommandTimeout = "shell_command_timeout"
         case shellProcessLaunchError = "shell_process_launch_error"
         case storeInitialized = "store_initialized"
+        case voiceModeOpenFailed = "voice_mode_open_failed"
+        case voiceModeOpenRequested = "voice_mode_open_requested"
         case xcodeRedirectFailed = "xcode_redirect_failed"
         case xcodeRedirectSkipped = "xcode_redirect_skipped"
         case xcodeRedirectSuccess = "xcode_redirect_success"

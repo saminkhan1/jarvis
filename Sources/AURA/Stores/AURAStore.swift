@@ -160,6 +160,10 @@ final class AURAStore: ObservableObject {
         "slider.horizontal.3"
     }
 
+    var hermesVoiceModeSummary: String {
+        "Hermes owns microphone recording, silence detection, STT, TTS, and the continuous voice loop. Use /voice status, /voice on, /voice off, and /voice tts inside the launched Hermes surface."
+    }
+
     func refreshAll(traceID: String = AURATelemetry.makeTraceID(prefix: "refresh")) async {
         let startedAt = Date()
         AURATelemetry.info(.refreshAllStart, category: .hermes, traceID: traceID)
@@ -918,6 +922,56 @@ final class AURAStore: ObservableObject {
             category: .ui,
             fields: [.privateValue("path")]
         )
+    }
+
+    func openHermesVoiceMode(traceID: String = AURATelemetry.makeTraceID(prefix: "voice")) {
+        let command = """
+        cd \(Self.shellQuoted(AURAPaths.projectRoot.path))
+        clear
+        echo 'AURA project-local Hermes Voice Mode'
+        echo 'Commands: /voice status, /voice on, /voice off, /voice tts'
+        echo 'Record key defaults to Ctrl+B and is configurable at voice.record_key.'
+        echo 'Local STT prefers faster-whisper when installed; no API key is required for that path.'
+        echo
+        ./script/aura-hermes
+        """
+
+        let script = """
+        tell application "Terminal"
+            activate
+            do script \(Self.appleScriptString(command))
+        end tell
+        """
+
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
+        process.arguments = ["-e", script]
+        process.currentDirectoryURL = AURAPaths.projectRoot
+
+        do {
+            try process.run()
+            lastCommand = "open Hermes voice mode"
+            lastOutput = "Opened project-local Hermes in Terminal. Use /voice status, then /voice on when dependencies are present."
+            lastUpdated = Date()
+            AURATelemetry.info(
+                .voiceModeOpenRequested,
+                category: .ui,
+                traceID: traceID,
+                fields: [.string("surface", "terminal")],
+                audit: .action
+            )
+        } catch {
+            lastCommand = "open Hermes voice mode"
+            lastOutput = "Could not open Terminal for Hermes Voice Mode: \(error.localizedDescription)"
+            lastUpdated = Date()
+            AURATelemetry.error(
+                .voiceModeOpenFailed,
+                category: .ui,
+                traceID: traceID,
+                fields: [.string("error_type", String(describing: type(of: error)))],
+                audit: .action
+            )
+        }
     }
 
     func openArtifact(_ artifact: AURAArtifact) {
@@ -1855,6 +1909,17 @@ final class AURAStore: ObservableObject {
         guard normalized.count > limit else { return normalized }
         let endIndex = normalized.index(normalized.startIndex, offsetBy: max(0, limit - 3))
         return String(normalized[..<endIndex]) + "..."
+    }
+
+    private static func shellQuoted(_ value: String) -> String {
+        "'" + value.replacingOccurrences(of: "'", with: "'\\''") + "'"
+    }
+
+    private static func appleScriptString(_ value: String) -> String {
+        "\"" + value
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "\"", with: "\\\"")
+            .replacingOccurrences(of: "\n", with: "\\n") + "\""
     }
 
     private static func toolTitle(from line: String) -> String {

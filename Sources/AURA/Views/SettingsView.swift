@@ -24,6 +24,16 @@ struct SettingsView: View {
                     .foregroundStyle(.secondary)
             }
 
+            Section("Hermes Voice Mode") {
+                Button("Open Hermes Voice Mode") {
+                    store.openHermesVoiceMode()
+                }
+
+                Text(store.hermesVoiceModeSummary)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
             Section("CUA Driver") {
                 LabeledContent("Status", value: store.cuaStatus.title)
                 LabeledContent("Executable", value: store.cuaStatus.executablePath ?? "Not installed")

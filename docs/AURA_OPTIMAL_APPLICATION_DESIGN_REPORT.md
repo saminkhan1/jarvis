@@ -634,7 +634,9 @@ Tasks:
    `script/aura-hermes`, never a global Hermes install.
 3. Show setup hints and diagnostics for Hermes voice prerequisites:
    `hermes-agent[voice]` dependencies, PortAudio, ffmpeg, `voice`, `stt`, and
-   `tts` config in `.aura/hermes-home/config.yaml`.
+   `tts` config in `.aura/hermes-home/config.yaml`. Use Hermes'
+   `tools.voice_mode.check_voice_requirements()` as the authoritative runtime
+   probe.
 4. Prefer Hermes local STT with `faster-whisper` when available, since it needs
    no API key. Cloud STT/TTS providers remain Hermes configuration.
 5. Link the user to Hermes voice commands: `/voice on`, `/voice off`,

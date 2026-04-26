@@ -68,6 +68,10 @@ struct MenuBarContentView: View {
                     NSApp.activate(ignoringOtherApps: true)
                 }
 
+                Button("Open Hermes Voice Mode") {
+                    store.openHermesVoiceMode()
+                }
+
                 Button("Refresh") {
                     Task { await store.refreshAll() }
                 }

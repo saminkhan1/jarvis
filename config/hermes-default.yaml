@@ -46,6 +46,26 @@ compression:
 memory:
   provider: builtin
 
+voice:
+  record_key: ctrl+b
+  max_recording_seconds: 120
+  auto_tts: false
+  beep_enabled: true
+  silence_threshold: 200
+  silence_duration: 3.0
+
+stt:
+  # Local STT uses faster-whisper and does not need an API key.
+  provider: local
+  local:
+    model: base
+
+tts:
+  # Edge TTS is the no-key default. Hermes owns TTS playback.
+  provider: edge
+  edge:
+    voice: en-US-AriaNeural
+
 mcp_servers:
   cua-driver:
     command: "${AURA_PROJECT_ROOT}/script/aura-cua-mcp"

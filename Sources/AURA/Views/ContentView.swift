@@ -451,6 +451,10 @@ private struct HermesControlCard: View {
                     Task { await store.runDoctor() }
                 }
 
+                Button("Open Voice Mode") {
+                    store.openHermesVoiceMode()
+                }
+
                 Button("Copy Setup") {
                     store.copySetupCommand()
                 }
@@ -460,6 +464,11 @@ private struct HermesControlCard: View {
                 }
             }
             .disabled(store.isRunning)
+
+            Text(store.hermesVoiceModeSummary)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
         }
         .padding(18)
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8, style: .continuous))

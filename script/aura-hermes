@@ -154,6 +154,35 @@ close_quiet_session() {
     >/dev/null 2>&1 || true
 }
 
+print_aura_voice_doctor() {
+  "$HERMES_PYTHON" - <<'PY'
+from tools.voice_mode import check_voice_requirements
+
+print()
+print("◆ AURA Hermes Voice Mode")
+try:
+    requirements = check_voice_requirements()
+except Exception as exc:
+    print(f"  ⚠ Hermes check_voice_requirements failed: {type(exc).__name__}")
+    print("    → Use /voice status inside Hermes for the runtime error detail.")
+else:
+    symbol = "✓" if requirements.get("available") else "⚠"
+    print(f"  {symbol} Hermes check_voice_requirements available: {requirements.get('available')}")
+    print(f"  {'✓' if requirements.get('audio_available') else '⚠'} Audio capture available: {requirements.get('audio_available')}")
+    print(f"  {'✓' if requirements.get('stt_available') else '⚠'} STT available: {requirements.get('stt_available')}")
+    missing = requirements.get("missing_packages") or []
+    if missing:
+        print(f"  ⚠ Missing packages: {', '.join(missing)}")
+    details = str(requirements.get("details") or "").strip()
+    if details:
+        for detail in details.splitlines():
+            print(f"    → {detail}")
+
+print("  → CLI commands: /voice status, /voice on, /voice off, /voice tts")
+print("  → AURA opens project-local Hermes only; it does not capture, transcribe, or store audio.")
+PY
+}
+
 if [[ "$is_quiet_chat" == "1" ]]; then
   started_epoch_ms="$(/usr/bin/python3 -c 'import time; print(round(time.time() * 1000))')"
   telemetry_log user.info hermes_wrapper_quiet_start operation="$operation" source="${session_source:-none}"
@@ -184,6 +213,16 @@ if [[ "$is_quiet_chat" == "1" ]]; then
   else
     telemetry_log user.err hermes_wrapper_quiet_finish operation="$operation" exit_code="$status" duration_ms="$duration_ms" hermes_session_id="${session_id:-none}"
   fi
+  exit "$status"
+fi
+
+if [[ "${1:-}" == "doctor" ]]; then
+  telemetry_log user.info hermes_wrapper_exec operation="$operation" source="${session_source:-none}"
+  set +e
+  "$HERMES_PYTHON" -m hermes_cli.main "$@"
+  status=$?
+  set -e
+  print_aura_voice_doctor
   exit "$status"
 fi
 

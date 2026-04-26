@@ -398,6 +398,110 @@ PY
   fi
 }
 
+migrate_hermes_voice_config() {
+  section "Hermes Voice Mode config"
+
+  local config_target="$HERMES_HOME/config.yaml"
+  local hermes_python="$HERMES_AGENT_DIR/venv/bin/python3"
+  [[ -x "$hermes_python" ]] || hermes_python="$HERMES_AGENT_DIR/venv/bin/python"
+
+  if [[ ! -f "$config_target" ]]; then
+    warn "$config_target is missing; setup will create it before voice config migration"
+    return
+  fi
+
+  if [[ "$CHECK_ONLY" == "1" ]]; then
+    if grep -q "^voice:" "$config_target" && grep -q "^stt:" "$config_target" && grep -q "^tts:" "$config_target"; then
+      ok "Hermes Voice Mode config blocks are present"
+    else
+      warn "Hermes Voice Mode config should include voice, stt, and tts blocks"
+    fi
+    return
+  fi
+
+  if [[ ! -x "$hermes_python" ]]; then
+    warn "Hermes Python is missing; skipping voice config migration"
+    return
+  fi
+
+  local migration_output
+  if migration_output="$("$hermes_python" - "$config_target" <<'PY'
+import sys
+
+import yaml
+
+path = sys.argv[1]
+
+with open(path, "r", encoding="utf-8") as fh:
+    config = yaml.safe_load(fh) or {}
+
+if not isinstance(config, dict):
+    raise SystemExit("config root is not a mapping")
+
+changed = False
+
+defaults = {
+    "voice": {
+        "record_key": "ctrl+b",
+        "max_recording_seconds": 120,
+        "auto_tts": False,
+        "beep_enabled": True,
+        "silence_threshold": 200,
+        "silence_duration": 3.0,
+    },
+    "stt": {
+        "provider": "local",
+        "local": {
+            "model": "base",
+        },
+    },
+    "tts": {
+        "provider": "edge",
+        "edge": {
+            "voice": "en-US-AriaNeural",
+        },
+    },
+}
+
+for section, values in defaults.items():
+    current = config.get(section)
+    if not isinstance(current, dict):
+        config[section] = values
+        changed = True
+        continue
+
+    for key, value in values.items():
+        if key not in current:
+            current[key] = value
+            changed = True
+        elif isinstance(value, dict) and not isinstance(current.get(key), dict):
+            current[key] = value
+            changed = True
+        elif isinstance(value, dict):
+            for child_key, child_value in value.items():
+                if child_key not in current[key]:
+                    current[key][child_key] = child_value
+                    changed = True
+
+if changed:
+    with open(path, "w", encoding="utf-8") as fh:
+        yaml.safe_dump(config, fh, sort_keys=False, allow_unicode=True)
+    print("migrated")
+else:
+    print("unchanged")
+PY
+  )"; then
+    if [[ "$migration_output" == "migrated" ]]; then
+      ok "Added Hermes Voice Mode config defaults"
+    else
+      ok "Hermes Voice Mode config already present"
+    fi
+  else
+    warn "Could not migrate Hermes Voice Mode config."
+    printf "%s\n" "$migration_output" >&2
+  fi
+}
+
 check_wrapper() {
   section "AURA Hermes wrapper"
 
@@ -507,6 +611,7 @@ main() {
   ensure_hermes_venv
   seed_templates
   migrate_cua_mcp_config
+  migrate_hermes_voice_config
   check_wrapper
   check_cua
   print_next_steps
