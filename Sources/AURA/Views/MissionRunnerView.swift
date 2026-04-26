@@ -17,7 +17,7 @@ struct MissionRunnerView: View {
                 MissionStatusPill(status: store.missionStatus)
             }
 
-            Text("Press ⌃⌥⌘A to open the cursor panel. The cursor indicator changes color with shortcut, running, approval, and error states.")
+            Text("Press ⌃⌥⌘A to expand the cursor composer in place. The cursor bot stays anchored near your pointer and turns into the prompt when you need it.")
                 .font(.callout)
                 .foregroundStyle(.secondary)
 
@@ -49,7 +49,7 @@ struct MissionRunnerView: View {
                 Button {
                     store.showAmbientEntryPoint()
                 } label: {
-                    Label("Open Panel", systemImage: "sparkle.magnifyingglass")
+                    Label("Open Composer", systemImage: "sparkle.magnifyingglass")
                 }
                 .keyboardShortcut("a", modifiers: [.control, .option, .command])
                 .disabled(!store.canOpenAmbientEntryPoint)

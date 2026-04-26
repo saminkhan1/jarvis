@@ -31,7 +31,7 @@ AURA owns:
 - Status and final output display.
 - Read-only display of `hermes sessions list`.
 - Global shortcut-first ambient entry with `⌃⌥⌘A`.
-- Cursor-adjacent mission panel for goal entry, start, and cancel.
+- Cursor-adjacent mission composer for goal entry, start, and cancel.
 - Cursor-adjacent approval card for `NEEDS_APPROVAL` actions.
 - Cursor-adjacent state indicator instead of replacing the system cursor.
 
