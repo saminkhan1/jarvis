@@ -36,18 +36,6 @@ final class AURAStore: ObservableObject {
     @Published private(set) var hermesSessionsUpdated: Date?
     @Published private(set) var isRunning = false
     @Published var missionGoal = ""
-    @Published var automationPolicy: GlobalAutomationPolicy {
-        didSet {
-            UserDefaults.standard.set(automationPolicy.rawValue, forKey: Self.automationPolicyKey)
-            AURATelemetry.info(
-                .automationPolicyChanged,
-                category: .ui,
-                fields: [.string("policy", self.automationPolicy.rawValue)],
-                audit: .governance
-            )
-            updateCursorIndicator()
-        }
-    }
     @Published var isAmbientEnabled = true {
         didSet {
             AURATelemetry.info(
@@ -102,7 +90,7 @@ final class AURAStore: ObservableObject {
     private var missionOutputChunkCount = 0
     private var missionRetryCount = 0
     private var lastHostControlReady: Bool?
-    private static let automationPolicyKey = "AURAAutomationPolicy"
+    private static let hermesToolSurfaceIdentifier = "hermes_config"
     private static let missionTimeoutSeconds: UInt64 = 300
 
     private var activeMissionIDValue: String {
@@ -114,15 +102,13 @@ final class AURAStore: ObservableObject {
     }
 
     init() {
-        let storedPolicy = UserDefaults.standard.string(forKey: Self.automationPolicyKey)
-        automationPolicy = GlobalAutomationPolicy(rawValue: storedPolicy ?? "") ?? .readOnly
         updateCursorIndicator()
         syncHostControlAvailability()
         startReadinessMonitor()
         AURATelemetry.info(
             .storeInitialized,
             category: .mission,
-            fields: [.string("policy", self.automationPolicy.rawValue)],
+            fields: [.string("tool_surface", Self.hermesToolSurfaceIdentifier)],
             audit: .lifecycle
         )
     }
@@ -147,7 +133,6 @@ final class AURAStore: ObservableObject {
         pendingApproval != nil
             && missionStatus == .needsApproval
             && currentHermesSessionID?.isEmpty == false
-            && automationPolicy != .readOnly
             && !isRunning
             && !isRunningCuaOnboarding
             && cuaStatus.readyForHostControl
@@ -159,6 +144,18 @@ final class AURAStore: ObservableObject {
 
     var canOpenAmbientEntryPoint: Bool {
         cuaStatus.readyForHostControl && !isRunningCuaOnboarding
+    }
+
+    var hermesToolSurfaceTitle: String {
+        "Hermes config"
+    }
+
+    var hermesToolSurfaceSummary: String {
+        "Tool exposure, MCP servers, approvals, and provider setup are owned by project-local Hermes in .aura/hermes-home/config.yaml."
+    }
+
+    var hermesToolSurfaceSystemImage: String {
+        "slider.horizontal.3"
     }
 
     func refreshAll(traceID: String = AURATelemetry.makeTraceID(prefix: "refresh")) async {
@@ -540,13 +537,10 @@ final class AURAStore: ObservableObject {
             "add",
             "cua-driver",
             "--command",
-            proxyPath,
-            "--env",
-            "AURA_AUTOMATION_POLICY=${AURA_AUTOMATION_POLICY}",
-            "AURA_CUA_ALLOW_ACTIONS=${AURA_CUA_ALLOW_ACTIONS}"
+            proxyPath
         ], traceID: traceID) { [weak self] result in
             if result.succeeded {
-                self?.lastOutput = "Registered Cua Driver MCP through AURA's daemon proxy.\n\n\(result.combinedOutput)"
+                self?.lastOutput = "Registered Cua Driver MCP through AURA's daemon proxy. Tool exposure stays in Hermes config.\n\n\(result.combinedOutput)"
             }
         }
 
@@ -631,7 +625,7 @@ final class AURAStore: ObservableObject {
             traceID: traceID,
             fields: missionFields([
                 .string("operation", "invoke_agent"),
-                .string("policy", self.automationPolicy.rawValue),
+                .string("tool_surface", Self.hermesToolSurfaceIdentifier),
                 .int("goal_chars", trimmedGoal.count)
             ]),
             audit: .mission
@@ -681,18 +675,15 @@ final class AURAStore: ObservableObject {
 
         let snapshot = missionContextSnapshot(traceID: traceID)
 
-        let toolsets = Self.hermesToolsets(for: automationPolicy)
         let envelope = Self.missionEnvelope(
             goal: trimmedGoal,
-            automationPolicy: automationPolicy,
             contextSnapshot: snapshot,
-            cuaStatus: cuaStatus,
-            exposedToolsets: toolsets
+            cuaStatus: cuaStatus
         )
 
         missionStatus = .running
         missionOutput = "Starting Hermes parent mission...\n"
-        lastCommand = "./script/aura-hermes chat -Q --source aura -t \(toolsets.joined(separator: ",")) -q <mission envelope>"
+        lastCommand = "./script/aura-hermes chat -Q --source aura -q <mission envelope>"
         lastOutput = missionOutput
         lastUpdated = Date()
 
@@ -703,16 +694,13 @@ final class AURAStore: ObservableObject {
                 traceID: traceID,
                 fields: missionFields([
                     .string("operation", "invoke_agent"),
-                    .string("toolsets", toolsets.joined(separator: ","))
+                    .string("tool_surface", Self.hermesToolSurfaceIdentifier)
                 ]),
                 audit: .agent
             )
             try launchHermes(arguments: hermesChatArguments(
-                query: envelope,
-                toolsets: toolsets
+                query: envelope
             ), environment: Self.hermesEnvironment(
-                for: automationPolicy,
-                cuaActionsAllowed: automationPolicy == .writeAlways,
                 missionID: activeMissionID
             ), traceID: traceID)
         } catch {
@@ -743,7 +731,7 @@ final class AURAStore: ObservableObject {
             traceID: traceID,
             fields: missionFields([
                 .string("operation", "approval_decision"),
-                .string("policy", self.automationPolicy.rawValue)
+                .string("tool_surface", Self.hermesToolSurfaceIdentifier)
             ]),
             audit: .approval
         )
@@ -792,40 +780,21 @@ final class AURAStore: ObservableObject {
             return
         }
 
-        guard automationPolicy != .readOnly else {
-            AURATelemetry.warning(
-                .approvalContinueBlocked,
-                category: .approval,
-                traceID: traceID,
-                fields: missionFields([.string("reason", "read_only_policy")]),
-                audit: .approval
-            )
-            missionStatus = .needsApproval
-            missionOutput += "\n\nRead Only mode blocks this action. Change the global automation policy to Ask Per Task or Always Allow before continuing."
-            lastOutput = missionOutput
-            lastUpdated = Date()
-            return
-        }
-
         cursorSurface.collapseToCompact()
         let snapshot = ContextSnapshot.capture()
         contextSnapshot = snapshot
         logContextCaptured(snapshot, traceID: traceID)
 
-        let toolsets = Self.hermesToolsetsForApprovedAction(for: automationPolicy)
         let envelope = Self.approvalContinuationEnvelope(
             approvedAction: pendingApproval.reason,
             originalGoal: missionGoal,
-            automationPolicy: automationPolicy,
             contextSnapshot: snapshot,
-            cuaStatus: cuaStatus,
-            exposedToolsets: toolsets
+            cuaStatus: cuaStatus
         )
 
         let resumeArguments = hermesChatArguments(
             query: envelope,
-            resumeSessionID: currentHermesSessionID,
-            toolsets: toolsets
+            resumeSessionID: currentHermesSessionID
         )
 
         self.pendingApproval = nil
@@ -837,17 +806,15 @@ final class AURAStore: ObservableObject {
             fields: missionFields([
                 .string("operation", "approval_result"),
                 .int("approved_chars", pendingApproval.reason.count),
-                .string("toolsets", toolsets.joined(separator: ","))
+                .string("tool_surface", Self.hermesToolSurfaceIdentifier)
             ]),
             audit: .approval
         )
         appendMissionOutput("\n\nApproved one pending action. Resuming Hermes...\n")
-        lastCommand = "./script/aura-hermes chat -Q --source aura --resume <session> -t \(toolsets.joined(separator: ",")) -q <approval continuation>"
+        lastCommand = "./script/aura-hermes chat -Q --source aura --resume <session> -q <approval continuation>"
 
         do {
             try launchHermes(arguments: resumeArguments, environment: Self.hermesEnvironment(
-                for: automationPolicy,
-                cuaActionsAllowed: automationPolicy != .readOnly,
                 missionID: activeMissionID
             ), traceID: traceID)
         } catch {
@@ -1104,8 +1071,7 @@ final class AURAStore: ObservableObject {
 
     private func hermesChatArguments(
         query: String,
-        resumeSessionID: String? = nil,
-        toolsets: [String]
+        resumeSessionID: String? = nil
     ) -> [String] {
         var arguments = ["chat", "-Q", "--source", "aura"]
 
@@ -1113,59 +1079,12 @@ final class AURAStore: ObservableObject {
             arguments.append(contentsOf: ["--resume", resumeSessionID])
         }
 
-        arguments.append(contentsOf: ["-t", toolsets.joined(separator: ",")])
         arguments.append(contentsOf: ["-q", query])
         return arguments
     }
 
-    private static func hermesToolsets(for automationPolicy: GlobalAutomationPolicy) -> [String] {
-        switch automationPolicy {
-        case .readOnly, .writePerTask:
-            return [
-                "web",
-                "skills",
-                "todo",
-                "memory",
-                "session_search",
-                "clarify",
-                "delegation",
-                "cua-driver"
-            ]
-        case .writeAlways:
-            return [
-                "web",
-                "browser",
-                "terminal",
-                "file",
-                "code_execution",
-                "skills",
-                "todo",
-                "memory",
-                "session_search",
-                "clarify",
-                "delegation",
-                "cua-driver"
-            ]
-        }
-    }
-
-    private static func hermesToolsetsForApprovedAction(for automationPolicy: GlobalAutomationPolicy) -> [String] {
-        switch automationPolicy {
-        case .readOnly:
-            return hermesToolsets(for: .readOnly)
-        case .writePerTask, .writeAlways:
-            return hermesToolsets(for: .writeAlways)
-        }
-    }
-
-    private static func hermesEnvironment(
-        for automationPolicy: GlobalAutomationPolicy,
-        cuaActionsAllowed: Bool,
-        missionID: String?
-    ) -> [String: String] {
+    private static func hermesEnvironment(missionID: String?) -> [String: String] {
         [
-            "AURA_AUTOMATION_POLICY": automationPolicy.rawValue,
-            "AURA_CUA_ALLOW_ACTIONS": cuaActionsAllowed ? "1" : "0",
             "AURA_MISSION_ID": missionID ?? "none"
         ]
     }
@@ -1406,11 +1325,10 @@ final class AURAStore: ObservableObject {
             durationMilliseconds: commandResult.durationMilliseconds,
             outputChunks: missionOutputChunkCount
         )
-        let toolsets = Self.hermesToolsets(for: automationPolicy)
         missionRetryCount += 1
         pendingApproval = nil
         missionStatus = .running
-        lastCommand = "./script/aura-hermes chat -Q --source aura --resume <session> -t \(toolsets.joined(separator: ",")) -q <failure recovery context>"
+        lastCommand = "./script/aura-hermes chat -Q --source aura --resume <session> -q <failure recovery context>"
 
         AURATelemetry.info(
             .missionRecoveryAttempt,
@@ -1432,12 +1350,9 @@ final class AURAStore: ObservableObject {
             try launchHermes(
                 arguments: hermesChatArguments(
                     query: diagnostic,
-                    resumeSessionID: sessionID,
-                    toolsets: toolsets
+                    resumeSessionID: sessionID
                 ),
                 environment: Self.hermesEnvironment(
-                    for: automationPolicy,
-                    cuaActionsAllowed: automationPolicy == .writeAlways,
                     missionID: activeMissionID
                 ),
                 traceID: traceID
@@ -1603,34 +1518,13 @@ final class AURAStore: ObservableObject {
 
     private static func missionEnvelope(
         goal: String,
-        automationPolicy: GlobalAutomationPolicy,
         contextSnapshot: ContextSnapshot,
-        cuaStatus: CuaDriverStatus,
-        exposedToolsets: [String]
+        cuaStatus: CuaDriverStatus
     ) -> String {
-        let localActionRule: String
-
-        switch automationPolicy {
-        case .readOnly:
-            localActionRule = "Read-only. You may analyze, research, plan, draft text, and use CUA read/snapshot tools to inspect the Mac. Do not write files, modify repositories, run state-changing terminal commands, use CUA action tools, click, type, send, post, purchase, delete, or move anything."
-        case .writePerTask:
-            localActionRule = "Ask per task. You may analyze, research, plan, draft text, and use CUA read/snapshot tools now. Before any local file write, repository edit, state-changing terminal command, CUA action tool, foreground click/type, or app workflow action, return NEEDS_APPROVAL with the exact proposed task and stop."
-        case .writeAlways:
-            localActionRule = "Always allow local writes and host control. You may perform local file edits, destructive file operations, state-changing terminal work, and CUA computer-use actions when useful. Still stop for credential-sensitive, external-send, posting, purchase, or financial actions."
-        }
-
-        let safetyHardStops: String
-        switch automationPolicy {
-        case .writeAlways:
-            safetyHardStops = "Return exactly \"NEEDS_APPROVAL: <reason and proposed next action>\" and stop before any action blocked by the global automation policy, external send, posting, purchase, credential-sensitive action, financial action, or foreground takeover not explicitly allowed above."
-        case .readOnly, .writePerTask:
-            safetyHardStops = "Return exactly \"NEEDS_APPROVAL: <reason and proposed next action>\" and stop before any action blocked by the global automation policy, external send, posting, purchase, destructive file operation, credential-sensitive action, financial action, or foreground takeover not explicitly allowed above."
-        }
-
         return """
         AURA MISSION ENVELOPE
 
-        You are Hermes Agent acting as AURA's parent mission orchestrator. AURA is only the native Mac cockpit. You own orchestration, planning, tool routing, background agents, and final synthesis.
+        You are Hermes Agent acting as AURA's parent mission orchestrator. AURA is only the native Mac cockpit. You own orchestration, planning, tool routing, configured approvals, background agents, and final synthesis.
 
         USER GOAL
         \(goal)
@@ -1638,26 +1532,23 @@ final class AURAStore: ObservableObject {
         CURRENT MAC CONTEXT
         \(contextSnapshot.markdownSummary)
 
-        GLOBAL AUTOMATION POLICY
-        - Policy: \(automationPolicy.title)
-        - Summary: \(automationPolicy.summary)
-        - Local action rule: \(localActionRule)
+        HERMES CONFIG AND TOOL SURFACE
+        - Tool availability, MCP exposure, command approvals, provider setup, and voice configuration are owned by project-local Hermes config at .aura/hermes-home/config.yaml.
+        - AURA does not choose Hermes toolsets for this mission and never uses global Hermes.
+        - Use the tools Hermes exposes to you. If a required tool is unavailable, explain the missing Hermes config/setup step.
         - CUA readiness: \(cuaStatus.title)
-        - CUA host-control allowed now: \(automationPolicy == .writeAlways ? "yes" : "read/snapshot only")
-        - Exposed Hermes toolsets: \(exposedToolsets.joined(separator: ", "))
-        - CUA is exposed through AURA's daemon-backed MCP proxy. Never request macOS permissions from workflow.
+        - CUA is exposed through AURA's daemon-backed MCP transport proxy when registered in Hermes config.
+        - Never request macOS permissions from workflow. Do not call check_permissions with prompt:true. If CUA reports missing permissions, stop; AURA must return to onboarding.
 
         ORCHESTRATION RULES
         - Use delegate_task for background workers when it materially helps.
         - Do not ask AURA to split the mission into subagents; you decide when to delegate.
         - Subagents start with fresh context. Pass every subagent a complete goal, relevant context, constraints, and expected summary.
         - Keep delegation flat for now: up to 3 concurrent children, no nested orchestrator children.
-        - Suggested subagent toolsets: ["web"] for research, ["terminal", "file"] for repo/file/build work, ["terminal", "file", "web"] for full-stack work.
         - Use CUA read/snapshot tools when the user asks about the current Mac screen or app state.
-        - Do not call check_permissions with prompt:true. If CUA reports missing permissions, stop; AURA must return to onboarding.
 
         SAFETY HARD STOPS
-        \(safetyHardStops)
+        Return exactly "NEEDS_APPROVAL: <reason and proposed next action>" and stop before any action blocked by Hermes config, external send, posting, purchase, credential-sensitive action, financial action, regulated advice/action, or unrelated foreground takeover.
         Drafting is allowed. Sending or posting is not.
         Do not copy protected creator content. Transform/adapt patterns into original work.
 
@@ -1668,22 +1559,15 @@ final class AURAStore: ObservableObject {
         """
     }
 
-    private static func approvalSafetyHardStops(for automationPolicy: GlobalAutomationPolicy) -> String {
-        switch automationPolicy {
-        case .writeAlways:
-            return "Even after this approval, stop before any external send, posting, purchase, credential-sensitive action, financial action, or unrelated foreground takeover."
-        case .readOnly, .writePerTask:
-            return "Even after this approval, stop before any external send, posting, purchase, destructive file operation outside the approved action, credential-sensitive action, financial action, or unrelated foreground takeover."
-        }
+    private static func approvalSafetyHardStops() -> String {
+        "Even after this approval, stop before any external send, posting, purchase, credential-sensitive action, financial action, regulated advice/action, unrelated foreground takeover, or destructive action outside the approved scope."
     }
 
     private static func approvalContinuationEnvelope(
         approvedAction: String,
         originalGoal: String,
-        automationPolicy: GlobalAutomationPolicy,
         contextSnapshot: ContextSnapshot,
-        cuaStatus: CuaDriverStatus,
-        exposedToolsets: [String]
+        cuaStatus: CuaDriverStatus
     ) -> String {
         return """
         AURA APPROVAL CONTINUATION
@@ -1702,16 +1586,15 @@ final class AURAStore: ObservableObject {
         CURRENT MAC CONTEXT
         \(contextSnapshot.markdownSummary)
 
-        GLOBAL AUTOMATION POLICY
-        - Policy: \(automationPolicy.title)
-        - Summary: \(automationPolicy.summary)
+        HERMES CONFIG AND TOOL SURFACE
+        - Tool availability, MCP exposure, command approvals, and provider setup remain owned by project-local Hermes config.
+        - AURA does not choose Hermes toolsets for this continuation.
         - CUA readiness: \(cuaStatus.title)
-        - CUA host-control allowed for this approved action when needed: yes
-        - Exposed Hermes toolsets: \(exposedToolsets.joined(separator: ", "))
-        - CUA is exposed through AURA's daemon-backed MCP proxy. Never request macOS permissions from workflow.
+        - CUA is exposed through AURA's daemon-backed MCP transport proxy when registered in Hermes config.
+        - Never request macOS permissions from workflow. If CUA reports missing permissions, stop; AURA must return to onboarding.
 
         SAFETY HARD STOPS
-        \(approvalSafetyHardStops(for: automationPolicy))
+        \(approvalSafetyHardStops())
 
         OUTPUT CONTRACT
         Continue with concise progress and end with outcome, artifacts/paths if any, blocked approvals if any, and recommended next action.
@@ -1740,7 +1623,7 @@ final class AURAStore: ObservableObject {
         \(safeError)
 
         INSTRUCTIONS:
-        Diagnose what went wrong from this bounded error tail. Do not repeat the same approach. Try one alternative strategy that still respects the AURA mission envelope and approval policy. If the task is impossible or needs user approval, say so clearly.
+        Diagnose what went wrong from this bounded error tail. Do not repeat the same approach. Try one alternative strategy that still respects the AURA mission envelope and Hermes-configured approvals. If the task is impossible or needs user approval, say so clearly.
         """
     }
 

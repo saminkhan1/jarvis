@@ -8,7 +8,7 @@ This is the current checklist before AURA can go to beta users.
 - Real e2e verification passes with project-local Hermes.
 - CUA Driver is installed on this machine, running through a user LaunchAgent, and registered with project-local Hermes MCP.
 - First launch now runs passive CUA readiness checks and locks AURA into onboarding until Cua Driver is installed, daemonized, permissioned, and registered. Permission prompts are only user-clicked from onboarding, use Cua Driver's explicit prompt mode, and never run from the mission workflow.
-- Normal Hermes missions use explicit toolsets including `cua-driver`, registered as `script/aura-cua-mcp`. The proxy forwards to the CuaDriver.app daemon and blocks prompt mode during workflow.
+- Normal Hermes missions use project-local Hermes config for tool exposure, including the `cua-driver` MCP registered as `script/aura-cua-mcp`. AURA no longer passes per-mission toolsets or CUA policy env gates.
 - Hermes sessions are shown from Hermes structured JSONL export.
 - Current `dist/AURA.app` is a local debug artifact, not a beta distributable.
 

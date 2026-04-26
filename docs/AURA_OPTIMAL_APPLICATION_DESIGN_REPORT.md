@@ -13,9 +13,9 @@ This report reads the current MVP execution report as the engineering boundary:
 - AURA must not become a custom agent loop, browser framework, task database, or hardcoded demo app.
 
 The optimal design is not "add every connector as a button." The optimal design
-is a thin native command layer that understands available capabilities, routes
-missions to Hermes with the right toolsets, surfaces trust and progress, and
-lets every connection degrade clearly when not configured.
+is a thin native command layer that sends context to project-local Hermes,
+surfaces trust and progress, and lets Hermes config own tool exposure,
+permissions, and provider setup.
 
 ## Sources Reviewed
 
@@ -52,7 +52,6 @@ Runtime checks on this machine:
 - `./script/aura-hermes doctor`
 - `./script/aura-hermes mcp list`
 - `./script/aura-hermes mcp test cua-driver`
-- `env AURA_AUTOMATION_POLICY=writeAlways AURA_CUA_ALLOW_ACTIONS=1 ./script/aura-hermes mcp test cua-driver`
 - `/Applications/CuaDriver.app/Contents/MacOS/cua-driver status`
 
 Generated design artifact:
@@ -69,15 +68,15 @@ Build AURA as a connection-aware ambient mission operating system for one user.
 The product loop should be:
 
 ```text
-invoke -> capture context -> classify capability/risk -> launch Hermes parent
+invoke -> capture context -> launch Hermes parent through project wrapper
   -> show workers/progress/approvals -> hand off artifacts -> continue or close
 ```
 
 AURA should own:
 
 - native invocation and UI
-- connection readiness
-- policy and approval UX
+- setup/status affordances
+- approval presentation and resume UX
 - Hermes process lifecycle
 - derived mission/worker/artifact UI state
 - audit and recovery
@@ -112,15 +111,16 @@ capabilities are available, what is safe, and what must be approved.
 
 ### 2. Every connection has three dimensions
 
-Each connection must be modeled by:
+Each connection must be understandable to the user by:
 
 - Capability: what it can do.
 - Readiness: installed, authenticated, permissioned, reachable, configured.
 - Risk: read-only, local-write, host-control, account-action, external-send,
   spend, credential, financial/legal/medical.
 
-Do not expose a connection just because Hermes knows about it. Expose it only
-when its readiness and risk are legible to the user.
+Do not reimplement those dimensions as an AURA planning layer. Hermes config is
+the source of truth for what is exposed. AURA may show status and setup hints so
+the user understands why Hermes can or cannot use a capability.
 
 ### 3. AURA's moat is trust and context, not tool ownership
 
@@ -149,8 +149,8 @@ Ready now:
 - OpenAI Codex auth is logged in.
 - CUA Driver daemon is running.
 - `cua-driver` MCP server is enabled through `script/aura-cua-mcp`.
-- CUA read-only tool surface is discoverable: 12 tools.
-- CUA action tool surface is discoverable when policy allows actions: 28 tools.
+- CUA raw MCP surface is discoverable through the daemon proxy. Hermes config
+  currently exposes the safe read-only include list to AURA-launched missions.
 - Core Hermes toolsets reported available: `browser`, `clarify`,
   `code_execution`, `cronjob`, `terminal`, `delegation`, `feishu_doc`,
   `feishu_drive`, `file`, `image_gen`, `memory`, `session_search`, `skills`,
@@ -161,8 +161,8 @@ Configured but needs caution:
 - `config/hermes-default.yaml` seeds `model.default: gpt-5.4` and
   `provider: openai-codex`. Treat this as setup-time config, not a product
   claim. Doctor/status must validate the active provider/model.
-- Terminal backend is local. This is powerful and should remain policy-gated
-  for writes/state changes.
+- Terminal backend is local. This is powerful and should remain controlled by
+  Hermes config and approval prompts for writes/state changes.
 
 Supported but not operational locally until setup is completed:
 
@@ -177,15 +177,16 @@ Supported but not operational locally until setup is completed:
   WhatsApp, Signal, Slack, Email, SMS, DingTalk, Feishu, WeCom, Weixin,
   BlueBubbles, QQBot.
 
-Current AURA mission toolsets:
+Current AURA mission launch:
 
-- Read Only and Ask Per Task:
-  `web,skills,todo,memory,session_search,clarify,delegation,cua-driver`
-- Approved action and Always Allow:
-  `web,browser,terminal,file,code_execution,skills,todo,memory,session_search,clarify,delegation,cua-driver`
+- AURA invokes `./script/aura-hermes chat -Q --source aura -q <mission envelope>`.
+- AURA does not pass `-t` toolset overrides.
+- AURA does not pass `AURA_AUTOMATION_POLICY` or `AURA_CUA_ALLOW_ACTIONS`.
+- Hermes config decides MCP/tool exposure and approval behavior.
 
-This is directionally right, but AURA needs a connection registry so missing
-providers do not become confusing mission failures.
+This keeps AURA lean and avoids a duplicate planner. Missing providers should
+be explained by Hermes status/doctor output and surfaced by AURA setup/status
+UI, not by custom mission routing code.
 
 ## Target Architecture
 
@@ -198,18 +199,18 @@ The drawing shows the concrete target topology:
 
 - Native Mac product surfaces: menu bar, ambient prompt, worker palette, badge
   stack, hover cards, activity view, readiness center.
-- AURA core: context snapshot, connection registry, capability plan, risk
-  policy, approval gate, mission envelope, Hermes process lifecycle, worker and
-  artifact UI projection, telemetry/audit.
+- AURA core: context snapshot, setup/status checks, mission envelope, Hermes
+  process lifecycle, worker and artifact UI projection, telemetry/audit.
 - Project-local Hermes runtime: wrapper, parent mission, provider routing,
-  toolsets, delegation, memory/sessions, skills, cron, MCP manager.
+  configured tool exposure, delegation, memory/sessions, skills, cron, MCP
+  manager, approval rules.
 - Connection lanes: CUA proxy/daemon/host Mac, web/search, browser automation,
   terminal/file/code, messaging/delivery, external MCP, isolated lanes, native
   artifacts.
 
-The drawing is intentionally connection-aware instead of button-oriented. It
-shows that every supported connection flows through readiness/risk policy before
-Hermes sees the mission or AURA exposes a user action.
+The drawing is intentionally connection-aware instead of button-oriented. The
+implementation boundary is Hermes-owned: connections flow through Hermes config,
+while AURA displays setup/status and projects Hermes progress into native UI.
 
 ```text
 User
@@ -218,11 +219,11 @@ User
   v
 AURA Native Shell
   |
-  | ContextSnapshot + CapabilityPlan + RiskPolicy + MissionEnvelope
+  | ContextSnapshot + MissionEnvelope
   v
 Hermes Parent Mission
   |
-  | built-in toolsets + skills + MCP + provider routing + delegation
+  | configured tools + skills + MCP + provider routing + delegation
   v
 Connections
   |-- CUA Driver MCP proxy for host screen/app read and action
@@ -318,63 +319,14 @@ Each row should have:
 
 - status: ready, needs auth, needs permission, missing dependency, disabled,
   degraded
-- risk tier
 - last checked
-- fix action
-- test action
+- setup hint
+- safe diagnostic/test action
 
-## Connection Registry Design
+## Hermes-Owned Connection Status
 
-Add a thin AURA-side registry. It is not a tool executor. It is a UI/readiness
-model derived from Hermes, CUA, config, and local probes.
-
-Suggested types:
-
-```swift
-struct AURAConnection: Identifiable {
-    let id: String
-    let title: String
-    let group: ConnectionGroup
-    let source: ConnectionSource
-    let capabilities: Set<CapabilityKind>
-    let riskTier: RiskTier
-    var status: ConnectionStatus
-    var setupAction: ConnectionSetupAction?
-    var testCommandShape: String?
-    var lastCheckedAt: Date?
-}
-
-enum CapabilityKind {
-    case contextRead
-    case hostControl
-    case webSearch
-    case browserAutomation
-    case localFileRead
-    case localFileWrite
-    case terminalExecution
-    case codeExecution
-    case appleAppControl
-    case messagingDelivery
-    case scheduling
-    case memory
-    case externalMCP
-    case artifactCreation
-}
-
-enum RiskTier {
-    case observe
-    case localDraft
-    case localWrite
-    case hostControl
-    case accountState
-    case externalSend
-    case spend
-    case credential
-    case regulated
-}
-```
-
-Initial registry should be built from:
+AURA should not add a second capability planner or permission registry. It may
+show a status view derived from bounded commands and local passive checks:
 
 - `./script/aura-hermes status`
 - `./script/aura-hermes doctor`
@@ -383,19 +335,25 @@ Initial registry should be built from:
 - CUA passive permission checks
 - local config template presence
 
-Do not parse secrets or display secret values.
+Rules:
 
-## Mission Routing Design
+- Use `script/aura-hermes` and `script/aura-cua-mcp`; never global Hermes.
+- Do not parse secrets or display secret values.
+- Do not infer tool permissions from AURA state.
+- Treat Hermes config as authoritative for which tools exist and what approvals
+  are required.
+- When setup is missing, show the Hermes/CUA command that diagnoses it instead
+  of blocking missions with a custom classifier.
 
-AURA should compute a `CapabilityPlan` before launching Hermes. The plan is
-advisory; Hermes still decides exact tool use.
+## Mission Launch Design
+
+AURA should send the user goal and Mac context directly to Hermes. Hermes remains
+the planner and tool router.
 
 ```text
 User goal
-  -> classify requested outcome
-  -> infer required capabilities
-  -> check connection readiness
-  -> choose safe toolset envelope
+  -> capture Mac context
+  -> build concise mission envelope
   -> launch Hermes parent
 ```
 
@@ -403,23 +361,22 @@ Examples:
 
 | Mission | Required capabilities | Preferred route | Approval |
 |---|---|---|---|
-| "What is this panel?" | context read, CUA screenshot/window | Hermes + CUA read tools | none in Read Only |
-| "Clean my screenshots" | file ops, desktop context | Hermes + CUA read + terminal/file after approval | file move approval unless Always Allow |
+| "What is this panel?" | context read, CUA screenshot/window | Hermes chooses configured CUA tools | Hermes config |
+| "Clean my screenshots" | file ops, desktop context | Hermes chooses configured file/CUA tools | Hermes config |
 | "Find leads under 50k followers" | web/search/browser, artifact | Hermes web; browser fallback | write CSV approval |
 | "Set reminder" | Apple skill/native app | Hermes apple-reminders skill or CUA app action | required |
 | "Build a Spotify app" | terminal/file/code, Spotify optional | Hermes code/file/terminal; Spotify only if ready | write/build/open approval |
 | "Send this email" | doc read, messaging delivery | Hermes skills/messaging | always send approval |
 | "Schedule this every Friday" | cron | Hermes cronjob | approval if it acts externally later |
 
-Toolset policy:
+Mission launch rules:
 
-- Read Only: no terminal/file/browser action unless the toolset is safe for the
-  specific task. Keep CUA read-only.
-- Ask Per Task: start with read/context/research. Resume with action toolsets
-  only after one explicit approval.
-- Always Allow: allow local writes and host control, but hard-stop external
-  sends, posts, purchases, credentials, financial/legal/medical, and unrelated
-  foreground takeover.
+- Do not pass `-t` from AURA.
+- Do not pass `AURA_AUTOMATION_POLICY` or `AURA_CUA_ALLOW_ACTIONS`.
+- Include only goal, context snapshot, CUA readiness, and AURA safety copy in
+  the mission envelope.
+- If Hermes returns `NEEDS_APPROVAL`, AURA presents the approval and resumes the
+  same Hermes session without changing toolsets.
 
 ## Worker And Artifact State
 
@@ -496,8 +453,9 @@ remain approval-gated.
 ### Terminal/File/Code Execution
 
 Use for local builds, generated apps, reports, CSVs, docs, and repo tasks after
-policy permits. Prefer isolated terminal backends later for risky/untrusted
-code. Local terminal is powerful and should be transparent in worker cards.
+Hermes config and approval rules permit. Prefer isolated terminal backends later
+for risky/untrusted code. Local terminal is powerful and should be transparent
+in worker cards.
 
 ### Skills
 
@@ -534,7 +492,8 @@ recovery but should not create a separate long-term memory system.
 
 Use MCP for GitHub, databases, internal APIs, file systems, and third-party
 tools. AURA should not hand-code integrations when an MCP server exists. Each
-MCP server gets a readiness row and per-tool risk policy.
+MCP server gets a readiness row that points back to Hermes config for tool
+exposure and approval behavior.
 
 ### Isolated Lanes
 
@@ -553,14 +512,11 @@ Do not run risky exploratory tasks on the user's real desktop by default.
 1. User presses `⌃⌥⌘A`.
 2. Ambient prompt opens near cursor.
 3. AURA captures frontmost app, bundle id, pid, cursor position, project root.
-4. AURA computes capability/risk plan.
-5. If required capability is unavailable, prompt shows a short blocker and a
-   Readiness Center action.
-6. If available, AURA launches one Hermes parent mission.
-7. Worker placeholder appears immediately.
-8. Hermes output/delegation/tool signals update worker cards.
-9. Approval blocks attach to the relevant worker.
-10. Completion creates artifacts and follow-up actions.
+4. AURA launches one Hermes parent mission through `script/aura-hermes`.
+5. Worker placeholder appears immediately.
+6. Hermes output/delegation/tool signals update worker cards.
+7. Approval blocks attach to the relevant worker.
+8. Completion creates artifacts and follow-up actions.
 
 ### Approval
 
@@ -586,11 +542,11 @@ Every artifact should have:
 - safety policy for opening/running
 
 CSV opens in Numbers or default CSV app. Generated apps can launch only when
-policy permits or after approval. Reports/logs open read-only.
+Hermes approval permits or after explicit approval. Reports/logs open read-only.
 
 ## Dev Implementation Plan
 
-### Phase 1: Connection Registry And Readiness Center
+### Phase 1: Hermes Config And Readiness Center
 
 Files likely involved:
 
@@ -602,12 +558,13 @@ Files likely involved:
 
 Tasks:
 
-1. Add connection/risk/status models.
-2. Parse bounded status from Hermes status/doctor and MCP list/test.
-3. Add readiness rows for Hermes, provider/model, CUA, web, browser, terminal,
+1. Keep CUA MCP transport lean and policy-free.
+2. Move CUA tool exposure to Hermes config.
+3. Parse bounded status from Hermes status/doctor and MCP list/test.
+4. Add readiness rows for Hermes, provider/model, CUA, web, browser, terminal,
    skills, messaging, cron, memory, external MCP.
-4. Add test/fix actions where safe.
-5. Ensure no secrets are read into UI.
+5. Add test/fix actions where safe.
+6. Ensure no secrets are read into UI.
 
 Acceptance:
 
@@ -623,15 +580,16 @@ Files likely involved:
 
 Tasks:
 
-1. Add lightweight mission classifier for required capabilities and risk.
-2. Include a capability/readiness summary in the mission envelope.
-3. Block or degrade missions when mandatory connections are unavailable.
-4. Keep Hermes as the final planner.
+1. Remove AURA-side policy/toolset selection from mission launch.
+2. Remove CUA action env gates from AURA-launched Hermes processes.
+3. Keep the mission envelope focused on goal, context, readiness, and safety.
+4. Resume approvals in the same Hermes session without changing toolsets.
 
 Acceptance:
 
-- Web research says exactly why it cannot run if web providers are missing.
-- Native app control routes through CUA/skills only when ready.
+- AURA launches Hermes without `-t`.
+- AURA does not pass `AURA_AUTOMATION_POLICY` or `AURA_CUA_ALLOW_ACTIONS`.
+- Hermes config remains the only source of tool exposure.
 
 ### Phase 3: WorkerRun Projection And Ambient Worker UI
 
@@ -706,19 +664,19 @@ Implement and test in this order:
 
 Create issues in this order:
 
-1. `connections: add AURAConnection registry models`
+1. `runtime: move CUA tool exposure to Hermes config`
 2. `connections: parse Hermes status/doctor into readiness rows`
-3. `connections: parse MCP list/test and CUA tool availability`
+3. `connections: parse MCP list/test and CUA availability`
 4. `ui: add Readiness Center`
-5. `mission: add capability/risk plan to mission envelope`
-6. `mission: degrade/block unavailable capabilities with actionable copy`
+5. `mission: defer tool routing to Hermes config`
+6. `mission: simplify approval resume through Hermes session`
 7. `workers: add WorkerRun and AURAArtifact projection models`
 8. `workers: parse Hermes delegation/tool/process/progress signals`
 9. `ui: add ambient worker palette and badge stack`
 10. `ui: add worker hover card and attached approval card`
 11. `artifacts: add artifact registry and open/reveal/continue actions`
 12. `web: add web provider readiness and research smoke test`
-13. `browser: add browser/CDP readiness and fallback policy`
+13. `browser: add browser/CDP readiness and fallback setup copy`
 14. `skills: verify Apple Reminders/Notes skill dependencies`
 15. `voice: add Hermes Voice Mode launcher`
 16. `messaging: add draft/send approval contract`
@@ -733,8 +691,8 @@ Create issues in this order:
 
 - Hermes provider/model ready.
 - CUA ready and MCP registered.
-- CUA read-only tools discovered in Read Only.
-- CUA action tools discovered only after policy allows actions.
+- Hermes configured CUA include list exposes only intended tools.
+- Raw CUA MCP daemon can still be tested through the transport proxy.
 - Web reports ready or exact missing provider keys.
 - Browser reports ready or exact missing dependency.
 - Skills reports installed and dependency status for Apple Reminders at minimum.
@@ -754,9 +712,10 @@ Create issues in this order:
 
 ### Safety
 
-- Read Only cannot see or call CUA action tools.
-- Ask Per Task cannot call CUA action tools before `NEEDS_APPROVAL`.
-- Always Allow still stops for external sends/posts/purchases/credentials.
+- AURA does not pass mission `-t` toolset overrides.
+- AURA does not pass CUA policy/action env gates.
+- Hermes config controls CUA action tool exposure.
+- Hermes still stops for external sends/posts/purchases/credentials.
 - Audit ledger does not store screenshots or prompt text.
 - Cancel stops the active parent mission.
 - Timeout does not orphan a visible worker.
@@ -783,17 +742,17 @@ Do not build:
 The most optimal AURA design is a native Mac trust shell around Hermes, not a
 feature-by-feature clone of any one demo.
 
-Use all supported connections through one capability registry and one mission
-pipeline. The user sees a simple ambient command surface, visible workers,
-clear approvals, and concrete artifacts. Hermes sees a precise mission envelope
-with context, policy, readiness, and toolsets. CUA and every other connection
-remain behind explicit readiness and risk boundaries.
+Use all supported connections through Hermes config and one mission pipeline.
+The user sees a simple ambient command surface, visible workers, clear
+approvals, and concrete artifacts. Hermes sees a precise mission envelope with
+context, readiness, and safety constraints. CUA and every other connection
+remain behind Hermes-owned configuration and explicit approval boundaries.
 
 Build in this order:
 
 ```text
-Connection Registry
-  -> Capability Plan
+Hermes Config/Readiness
+  -> Mission Envelope
   -> Worker UI
   -> Artifact Handoff
   -> Voice

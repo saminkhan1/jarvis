@@ -15,15 +15,11 @@ struct SettingsView: View {
                 }
             }
 
-            Section("Global Automation") {
-                Picker("Policy", selection: $store.automationPolicy) {
-                    ForEach(GlobalAutomationPolicy.allCases) { policy in
-                        Label(policy.title, systemImage: policy.systemImage)
-                            .tag(policy)
-                    }
-                }
+            Section("Hermes Tooling") {
+                LabeledContent("Tool Surface", value: store.hermesToolSurfaceTitle)
+                LabeledContent("Config", value: AURAPaths.hermesHome.appendingPathComponent("config.yaml").path)
 
-                Text(store.automationPolicy.summary)
+                Text(store.hermesToolSurfaceSummary)
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

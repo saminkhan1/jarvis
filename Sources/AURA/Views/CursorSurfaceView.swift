@@ -74,7 +74,7 @@ struct CursorSurfaceView: View {
 
                 Spacer(minLength: 0)
 
-                Text(store.automationPolicy.title)
+                Text(store.hermesToolSurfaceTitle)
                     .font(.caption2.weight(.semibold))
                     .foregroundStyle(.secondary)
                     .padding(.horizontal, 8)
@@ -131,7 +131,7 @@ struct CursorSurfaceView: View {
             }
 
             HStack(alignment: .center, spacing: 10) {
-                Label("Policy: \(store.automationPolicy.title)", systemImage: store.automationPolicy.systemImage)
+                Label("Tools: \(store.hermesToolSurfaceTitle)", systemImage: store.hermesToolSurfaceSystemImage)
                     .font(.caption)
                     .foregroundStyle(.secondary)
 
@@ -238,11 +238,9 @@ struct CursorSurfaceView: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
 
-            if store.automationPolicy == .readOnly {
-                Text("Read Only blocks this action. Change the global automation policy before continuing.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
+            Text("Hermes config controls whether the approved action is available.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
         }
         .padding(12)
         .background(Color.orange.opacity(0.12), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
@@ -299,7 +297,7 @@ struct CursorSurfaceView: View {
             for: store.missionStatus,
             isShortcutActive: store.isShortcutPulseActive,
             missionOutput: store.missionOutput,
-            automationPolicyTitle: store.automationPolicy.title
+            hermesToolSurfaceTitle: store.hermesToolSurfaceTitle
         )
     }
 
@@ -350,7 +348,7 @@ private enum CursorSurfaceText {
         for status: MissionStatus,
         isShortcutActive: Bool,
         missionOutput: String,
-        automationPolicyTitle: String
+        hermesToolSurfaceTitle: String
     ) -> String {
         if isShortcutActive {
             return "Type in the composer, then press Command-Return."
@@ -358,7 +356,7 @@ private enum CursorSurfaceText {
 
         switch status {
         case .idle:
-            return "Control-Option-Command-A opens the composer. Policy: \(automationPolicyTitle)."
+            return "Control-Option-Command-A opens the composer. Tools: \(hermesToolSurfaceTitle)."
         case .running:
             return "I will update here while Hermes works."
         case .needsApproval:

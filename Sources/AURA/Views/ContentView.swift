@@ -230,7 +230,7 @@ private struct StatusGrid: View {
         LazyVGrid(columns: [GridItem(.adaptive(minimum: 180), spacing: 12)], spacing: 12) {
             StatusTile(title: "Hermes", value: store.healthState.title, systemImage: "bolt.horizontal.circle", color: healthColor)
             StatusTile(title: "Mission", value: store.missionStatus.title, systemImage: "point.3.connected.trianglepath.dotted", color: missionColor)
-            StatusTile(title: "Policy", value: store.automationPolicy.title, systemImage: store.automationPolicy.systemImage, color: .secondary)
+            StatusTile(title: "Tools", value: store.hermesToolSurfaceTitle, systemImage: store.hermesToolSurfaceSystemImage, color: .secondary)
             StatusTile(title: "CUA", value: store.cuaStatus.title, systemImage: "display.and.arrow.down", color: store.cuaStatus.readyForHostControl ? .green : .orange)
         }
     }

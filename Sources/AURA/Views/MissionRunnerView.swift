@@ -37,7 +37,7 @@ struct MissionRunnerView: View {
                 .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
             }
 
-            Label("Global policy: \(store.automationPolicy.title)", systemImage: store.automationPolicy.systemImage)
+            Label("Tools: \(store.hermesToolSurfaceTitle)", systemImage: store.hermesToolSurfaceSystemImage)
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(.secondary)
 
@@ -89,11 +89,9 @@ private struct ApprovalRequestCard: View {
                 .textSelection(.enabled)
                 .fixedSize(horizontal: false, vertical: true)
 
-            if store.automationPolicy == .readOnly {
-                Text("Read Only blocks this action. Change the global automation policy to Ask Per Task or Always Allow before continuing.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
+            Text("Hermes config controls whether the approved action is available.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
 
             HStack {
                 Button(role: .cancel) {

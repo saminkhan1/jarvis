@@ -27,47 +27,6 @@ enum MissionStatus {
     }
 }
 
-enum GlobalAutomationPolicy: String, CaseIterable, Identifiable {
-    case readOnly
-    case writePerTask
-    case writeAlways
-
-    var id: String { rawValue }
-
-    var title: String {
-        switch self {
-        case .readOnly:
-            return "Read Only"
-        case .writePerTask:
-            return "Ask Per Task"
-        case .writeAlways:
-            return "Always Allow"
-        }
-    }
-
-    var summary: String {
-        switch self {
-        case .readOnly:
-            return "Hermes can read context, inspect the screen, explain, research, and plan. No writes or host-control actions."
-        case .writePerTask:
-            return "Hermes can inspect the screen and stops with NEEDS_APPROVAL before local writes or host-control actions."
-        case .writeAlways:
-            return "Hermes may perform local writes, destructive file operations, and CUA host-control actions without asking each task."
-        }
-    }
-
-    var systemImage: String {
-        switch self {
-        case .readOnly:
-            return "eye"
-        case .writePerTask:
-            return "hand.raised"
-        case .writeAlways:
-            return "bolt.badge.checkmark"
-        }
-    }
-}
-
 struct ApprovalRequest: Identifiable {
     let id = UUID()
     let reason: String

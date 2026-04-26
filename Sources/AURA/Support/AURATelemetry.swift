@@ -52,7 +52,6 @@ enum AURATelemetry {
         case approvalContinueLaunchHermes = "approval_continue_launch_hermes"
         case approvalContinueRequested = "approval_continue_requested"
         case approvalDenied = "approval_denied"
-        case automationPolicyChanged = "automation_policy_changed"
         case contextCaptured = "context_captured"
         case contextReused = "context_reused"
         case cuaDaemonCommandCopied = "cua_daemon_command_copied"

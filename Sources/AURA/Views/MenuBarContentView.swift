@@ -49,7 +49,7 @@ struct MenuBarContentView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
 
-                Text("Policy: \(store.automationPolicy.title)")
+                Text("Tools: \(store.hermesToolSurfaceTitle)")
                     .font(.caption)
                     .foregroundStyle(.secondary)
 
