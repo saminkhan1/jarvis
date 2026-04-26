@@ -49,10 +49,13 @@ for script_name in ("script/aura-hermes", "script/aura-cua-mcp"):
                         fail(path, line_no, f"telemetry field is not snake_case: {key}")
 
     if script_name.endswith("aura-cua-mcp"):
+        for match in re.finditer(r'telemetry_log\(\s*"[^"]+"\s*,\s*"([a-z0-9_]+)"', text, re.S):
+            if match.group(1) not in known_events:
+                fail(path, text[:match.start()].count("\n") + 1, f"unknown telemetry event: {match.group(1)}")
+
         for line_no, line in enumerate(text.splitlines(), start=1):
-            match = re.search(r'telemetry_log\(\s*"[^"]+"\s*,\s*"([a-z0-9_]+)"', line)
-            if match and match.group(1) not in known_events:
-                fail(path, line_no, f"unknown telemetry event: {match.group(1)}")
+            if re.search(r"\btool\s*=", line):
+                fail(path, line_no, "CUA telemetry must use tool_name=, not tool=")
 
 if not known_events:
     errors.append("Sources/AURA/Support/AURATelemetry.swift: no event registry found")

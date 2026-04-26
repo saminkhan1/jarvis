@@ -41,6 +41,7 @@ READ_ONLY_TOOLS = {
 }
 
 TRUTHY = {"1", "true", "yes", "y", "on"}
+_PROXY_STARTED_AT = time.monotonic()
 
 
 def telemetry_log(priority: str, event: str, **fields: Any) -> None:
@@ -64,6 +65,7 @@ def telemetry_log(priority: str, event: str, **fields: Any) -> None:
         "severity": severity,
         "app_session_id": os.environ.get("AURA_APP_SESSION_ID", "none"),
         "trace_id": os.environ.get("AURA_TRACE_ID", "none"),
+        "mission_id": os.environ.get("AURA_MISSION_ID", "none"),
         "process_id": os.getpid(),
         "process_kind": os.environ.get("AURA_PROCESS_KIND", "cua-mcp-proxy"),
         **normalized_fields,
@@ -258,7 +260,7 @@ def call_tool(name: str, args: dict[str, Any]) -> dict[str, Any]:
     telemetry_log(
         "user.info",
         "cua_tool_call_start",
-        tool=name,
+        tool_name=name,
         policy=current_policy,
         actions_allowed=actions_allowed,
         allowed=allowed,
@@ -268,9 +270,10 @@ def call_tool(name: str, args: dict[str, Any]) -> dict[str, Any]:
         telemetry_log(
             "user.warning",
             "cua_tool_call_finish",
-            tool=name,
+            tool_name=name,
             status="policy_blocked",
             policy=current_policy,
+            actions_allowed=actions_allowed,
             duration_ms=duration_ms(started_at),
         )
         return policy_block_result(name)
@@ -284,9 +287,11 @@ def call_tool(name: str, args: dict[str, Any]) -> dict[str, Any]:
             telemetry_log(
                 "user.err",
                 "cua_tool_call_finish",
-                tool=name,
+                tool_name=name,
                 status="daemon_unavailable",
                 phase="permission_check",
+                policy=current_policy,
+                actions_allowed=actions_allowed,
                 error_type=type(exc).__name__,
                 duration_ms=duration_ms(started_at),
             )
@@ -296,9 +301,10 @@ def call_tool(name: str, args: dict[str, Any]) -> dict[str, Any]:
             telemetry_log(
                 "user.warning",
                 "cua_tool_call_finish",
-                tool=name,
+                tool_name=name,
                 status="setup_required",
                 policy=current_policy,
+                actions_allowed=actions_allowed,
                 duration_ms=duration_ms(started_at),
             )
             return tool_result_error(
@@ -312,8 +318,10 @@ def call_tool(name: str, args: dict[str, Any]) -> dict[str, Any]:
         telemetry_log(
             "user.err",
             "cua_tool_call_finish",
-            tool=name,
+            tool_name=name,
             status="daemon_unavailable",
+            policy=current_policy,
+            actions_allowed=actions_allowed,
             error_type=type(exc).__name__,
             duration_ms=duration_ms(started_at),
         )
@@ -323,8 +331,10 @@ def call_tool(name: str, args: dict[str, Any]) -> dict[str, Any]:
         telemetry_log(
             "user.err",
             "cua_tool_call_finish",
-            tool=name,
+            tool_name=name,
             status="daemon_error",
+            policy=current_policy,
+            actions_allowed=actions_allowed,
             duration_ms=duration_ms(started_at),
         )
         return tool_result_error(f"AURA_CUA_DAEMON_ERROR: {response.get('error', 'unknown error')}")
@@ -334,8 +344,10 @@ def call_tool(name: str, args: dict[str, Any]) -> dict[str, Any]:
         telemetry_log(
             "user.err",
             "cua_tool_call_finish",
-            tool=name,
+            tool_name=name,
             status="malformed_response",
+            policy=current_policy,
+            actions_allowed=actions_allowed,
             duration_ms=duration_ms(started_at),
         )
         return tool_result_error("AURA_CUA_DAEMON_ERROR: malformed Cua Driver response")
@@ -343,9 +355,10 @@ def call_tool(name: str, args: dict[str, Any]) -> dict[str, Any]:
     telemetry_log(
         "user.info",
         "cua_tool_call_finish",
-        tool=name,
+        tool_name=name,
         status="ok",
         policy=current_policy,
+        actions_allowed=actions_allowed,
         duration_ms=duration_ms(started_at),
     )
     return payload
@@ -388,7 +401,7 @@ def handle(message: dict[str, Any]) -> None:
         name = str(params.get("name", ""))
         args = params.get("arguments") or {}
         if not isinstance(args, dict):
-            telemetry_log("user.warning", "cua_tool_call_bad_arguments", tool=name)
+            telemetry_log("user.warning", "cua_tool_call_bad_arguments", tool_name=name)
             respond(message_id, tool_result_error("AURA_CUA_BAD_ARGUMENTS: tool arguments must be an object"))
             return
 
@@ -403,12 +416,14 @@ def handle(message: dict[str, Any]) -> None:
 
 
 def main() -> int:
+    socket_path_kind = "custom_env" if os.environ.get("AURA_CUA_DAEMON_SOCKET") else "default_user_cache"
     telemetry_log(
         "user.info",
         "cua_proxy_start",
-        socket_path=SOCKET_PATH,
+        socket_path_kind=socket_path_kind,
         policy=policy(),
         actions_allowed=action_tools_allowed(),
+        duration_ms=duration_ms(_PROXY_STARTED_AT),
     )
 
     for raw in sys.stdin:
@@ -426,7 +441,11 @@ def main() -> int:
 
         handle(message)
 
-    telemetry_log("user.info", "cua_proxy_stop")
+    telemetry_log(
+        "user.info",
+        "cua_proxy_stop",
+        duration_ms=duration_ms(_PROXY_STARTED_AT),
+    )
     return 0
 
 

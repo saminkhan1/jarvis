@@ -51,6 +51,7 @@ payload = {
     "severity": severity,
     "app_session_id": os.environ.get("AURA_APP_SESSION_ID", "none"),
     "trace_id": os.environ.get("AURA_TRACE_ID", "none"),
+    "mission_id": os.environ.get("AURA_MISSION_ID", "none"),
     "process_id": pid,
     "process_kind": os.environ.get("AURA_PROCESS_KIND", "wrapper"),
     **fields,

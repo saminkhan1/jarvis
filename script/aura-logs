@@ -1,0 +1,99 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SUBSYSTEM="com.wexprolabs.aura"
+
+usage() {
+  cat <<USAGE
+usage: aura-logs [stream|audit]
+
+  stream  Live Apple Unified Log stream (default)
+  audit   Tail the JSONL audit ledger
+USAGE
+}
+
+case "${1:-stream}" in
+  stream)
+    /usr/bin/log stream --predicate "subsystem == '$SUBSYSTEM' || eventMessage CONTAINS '\"process_kind\":\"wrapper\"' || eventMessage CONTAINS '\"process_kind\":\"cua-mcp-proxy\"'" --style json 2>/dev/null \
+      | /usr/bin/python3 -u -c '
+import json
+import sys
+
+SKIP = {
+    "schema_version",
+    "app_session_id",
+    "process_id",
+    "span_id",
+    "parent_span_id",
+}
+
+for raw in sys.stdin:
+    line = raw.strip()
+    if not line:
+        continue
+    try:
+        entry = json.loads(line)
+        message = entry.get("eventMessage", "")
+        if not message.startswith("{"):
+            print(line, flush=True)
+            continue
+
+        payload = json.loads(message)
+        severity = str(payload.get("severity", "?")).upper()
+        event = payload.get("event", "?")
+        trace = str(payload.get("trace_id", "-"))
+        mission = str(payload.get("mission_id", "-"))
+        if len(trace) > 16:
+            trace = trace[:16]
+        if len(mission) > 16:
+            mission = mission[:16]
+
+        fields = {k: v for k, v in payload.items() if k not in SKIP and k not in {"severity", "event", "trace_id", "mission_id"}}
+        suffix = f" {fields}" if fields else ""
+        print(f"{severity:7s} [{trace}] [{mission}] {event}{suffix}", flush=True)
+    except Exception:
+        print(line, flush=True)
+'
+    ;;
+  audit)
+    ledger="${AURA_AUDIT_LEDGER_PATH:-$HOME/Library/Application Support/AURA/audit/aura-audit.jsonl}"
+    if [[ ! -f "$ledger" ]]; then
+      printf "No audit ledger at: %s\n" "$ledger" >&2
+      exit 1
+    fi
+
+    tail -f "$ledger" \
+      | /usr/bin/python3 -u -c '
+import json
+import sys
+
+for raw in sys.stdin:
+    line = raw.strip()
+    if not line:
+        continue
+    try:
+        payload = json.loads(line)
+        recorded_at = payload.get("recorded_at", "?")
+        kind = str(payload.get("audit_kind", "?"))
+        category = str(payload.get("category", "?"))
+        event = payload.get("event", "?")
+        trace = str(payload.get("trace_id", "-"))
+        mission = str(payload.get("mission_id", "-"))
+        if len(trace) > 16:
+            trace = trace[:16]
+        if len(mission) > 16:
+            mission = mission[:16]
+        print(f"{recorded_at}  {kind:12s}  {category:10s}  [{trace}] [{mission}] {event}", flush=True)
+    except Exception:
+        print(line, flush=True)
+'
+    ;;
+  -h|--help)
+    usage
+    ;;
+  *)
+    printf "Unknown command: %s\n" "$1" >&2
+    usage >&2
+    exit 2
+    ;;
+esac

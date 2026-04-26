@@ -20,8 +20,9 @@ Current phase: Hermes-orchestrated ambient mission runner.
 - AI runtime: OpenAI Codex provider through Hermes, currently using `gpt-5.4` by default.
 - Tooling lane: Hermes MCP with AURA's daemon-backed `script/aura-cua-mcp` proxy for Cua Driver. AURA does not launch raw `cua-driver mcp` during missions.
 - Automation policy: Read Only, Ask Per Task, and Always Allow are enforced by AURA UI state plus the CUA MCP proxy.
-- Observability: typed JSON Apple Unified Logging through `AURATelemetry`, stable event registry, trace IDs, app session IDs, privacy-safe fields, and feature categories for app, launch, UI, mission, approval, Hermes, CUA, and process events.
+- Observability: typed JSON Apple Unified Logging through `AURATelemetry`, stable event registry, trace IDs, stable mission IDs, app session IDs, streaming Hermes signal extraction, privacy-safe fields, and feature categories for app, launch, UI, mission, approval, Hermes, CUA, and process events.
 - Audit trail: bounded local JSONL ledger through `AURAAuditLedger` for mission, approval, Hermes, CUA governance, and tool/action boundary events. It avoids raw prompts, mission output, screenshots, tool args/results, secrets, raw paths, and document contents.
+- Developer telemetry: `script/aura-logs stream` pretty-prints live unified logs, and `script/aura-logs audit` tails the local JSONL audit ledger.
 - Verification: `script/verify_logging.sh` enforces logging schema rules, `script/e2e_test.sh` runs the real Hermes/CUA/approval/app-launch path, and `script/smoke_test.sh` delegates to e2e.
 - Distribution state: SwiftPM-built local app bundle in `dist/`; standalone beta packaging/signing/notarization is still a blocker.
 
@@ -35,6 +36,8 @@ Current phase: Hermes-orchestrated ambient mission runner.
 ./script/aura-hermes chat -Q --source aura -t web,skills,todo,memory,session_search,clarify,delegation -q "Reply exactly: AURA Hermes OK"
 ./script/aura-hermes tools --summary list
 ./script/aura-hermes mcp list
+./script/aura-logs stream
+./script/aura-logs audit
 ./script/e2e_test.sh
 ./script/smoke_test.sh
 ```
@@ -47,8 +50,9 @@ Current phase: Hermes-orchestrated ambient mission runner.
 - Normal Hermes missions expose CUA through AURA's daemon-backed MCP proxy. The proxy forwards to the already-onboarded CuaDriver.app daemon instead of launching raw `cua-driver mcp` under AURA.
 - Ambient panel opens with `⌃⌥⌘A` for mission entry and approval continuation.
 - Hermes is invoked only through `script/aura-hermes`.
-- AURA launches one Hermes parent mission and resumes it with `--resume` after approval.
+- AURA launches one Hermes parent mission, carries one stable `mission_id` through approval cycles, and resumes it with `--resume` after approval.
 - AURA emits typed JSON unified logs plus a bounded local JSONL audit ledger for mission, approval, Hermes, and CUA governance events.
+- AURA extracts bounded structured signals from streaming Hermes output and can make one diagnostic recovery attempt after a non-cancelled Hermes failure when a session ID is available.
 - `script/verify_logging.sh` enforces the telemetry schema and blocks ad hoc app logging.
 - `script/e2e_test.sh` covers real project-local Hermes status, CUA readiness, quiet mission start, `NEEDS_APPROVAL`, `--resume`, and app launch verification.
 - `script/smoke_test.sh` delegates to the same real e2e flow.
@@ -61,6 +65,7 @@ Current phase: Hermes-orchestrated ambient mission runner.
 2. Add first-run bootstrap for Hermes, CUA readiness, and MCP registration outside this repo.
 3. Add Developer ID signing, hardened runtime, notarization, stapling, and Gatekeeper validation.
 4. Run a clean-machine beta install test.
+5. Validate Hermes signal extraction patterns against longer real missions, then add the deferred effective-action mission metric.
 
 See `docs/BETA_READINESS.md` for the current beta gate checklist.
 

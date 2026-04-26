@@ -96,10 +96,20 @@ final class AURAStore: ObservableObject {
     private var readinessMonitorTask: Task<Void, Never>?
     private var didRunLaunchOnboarding = false
     private var activeMissionTraceID: String?
+    private var activeMissionID: String?
     private var activeMissionStartedAt: Date?
     private var missionOutputChunkCount = 0
+    private var missionRetryCount = 0
     private var lastHostControlReady: Bool?
     private static let automationPolicyKey = "AURAAutomationPolicy"
+
+    private var activeMissionIDValue: String {
+        activeMissionID ?? "none"
+    }
+
+    private func missionFields(_ fields: [AURATelemetry.Field] = []) -> [AURATelemetry.Field] {
+        [.string("mission_id", activeMissionIDValue)] + fields
+    }
 
     init() {
         let storedPolicy = UserDefaults.standard.string(forKey: Self.automationPolicyKey)
@@ -606,28 +616,31 @@ final class AURAStore: ObservableObject {
                 .missionStartIgnored,
                 category: .mission,
                 traceID: traceID,
-                fields: [.string("reason", "already_running")],
+                fields: missionFields([.string("reason", "already_running")]),
                 audit: .mission
             )
             return
         }
 
         let traceID = AURATelemetry.makeTraceID(prefix: "mission")
+        let missionID = AURATelemetry.makeSpanID(prefix: "mission")
         let requestedAt = Date()
         activeMissionTraceID = traceID
+        activeMissionID = missionID
         activeMissionStartedAt = requestedAt
         missionOutputChunkCount = 0
+        missionRetryCount = 0
 
         let trimmedGoal = missionGoal.trimmingCharacters(in: .whitespacesAndNewlines)
         AURATelemetry.info(
             .missionStartRequested,
             category: .mission,
             traceID: traceID,
-            fields: [
+            fields: missionFields([
                 .string("operation", "invoke_agent"),
                 .string("policy", self.automationPolicy.rawValue),
                 .int("goal_chars", trimmedGoal.count)
-            ],
+            ]),
             audit: .mission
         )
 
@@ -637,11 +650,11 @@ final class AURAStore: ObservableObject {
                 .missionStartBlocked,
                 category: .mission,
                 traceID: traceID,
-                fields: [
+                fields: missionFields([
                     .string("reason", "cua_not_ready"),
                     .int("issue_count", self.cuaStatus.issues.count),
                     .int("duration_ms", AURATelemetry.durationMilliseconds(from: requestedAt))
-                ],
+                ]),
                 audit: .mission
             )
             lockFunctionalSurfaceForOnboarding()
@@ -655,10 +668,10 @@ final class AURAStore: ObservableObject {
                 .missionStartBlocked,
                 category: .mission,
                 traceID: traceID,
-                fields: [
+                fields: missionFields([
                     .string("reason", "empty_goal"),
                     .int("duration_ms", AURATelemetry.durationMilliseconds(from: requestedAt))
-                ],
+                ]),
                 audit: .mission
             )
             missionStatus = .failed
@@ -694,10 +707,10 @@ final class AURAStore: ObservableObject {
                 .missionLaunchHermes,
                 category: .mission,
                 traceID: traceID,
-                fields: [
+                fields: missionFields([
                     .string("operation", "invoke_agent"),
                     .string("toolsets", toolsets.joined(separator: ","))
-                ],
+                ]),
                 audit: .agent
             )
             try launchHermes(arguments: hermesChatArguments(
@@ -705,17 +718,18 @@ final class AURAStore: ObservableObject {
                 toolsets: toolsets
             ), environment: Self.hermesEnvironment(
                 for: automationPolicy,
-                cuaActionsAllowed: automationPolicy == .writeAlways
+                cuaActionsAllowed: automationPolicy == .writeAlways,
+                missionID: activeMissionID
             ), traceID: traceID)
         } catch {
             AURATelemetry.error(
                 .missionLaunchFailed,
                 category: .mission,
                 traceID: traceID,
-                fields: [
+                fields: missionFields([
                     .string("error_type", String(describing: type(of: error))),
                     .int("duration_ms", AURATelemetry.durationMilliseconds(from: requestedAt))
-                ],
+                ]),
                 audit: .mission
             )
             missionStatus = .failed
@@ -733,10 +747,10 @@ final class AURAStore: ObservableObject {
             .approvalContinueRequested,
             category: .approval,
             traceID: traceID,
-            fields: [
+            fields: missionFields([
                 .string("operation", "approval_decision"),
                 .string("policy", self.automationPolicy.rawValue)
-            ],
+            ]),
             audit: .approval
         )
 
@@ -746,10 +760,10 @@ final class AURAStore: ObservableObject {
                 .approvalContinueBlocked,
                 category: .approval,
                 traceID: traceID,
-                fields: [
+                fields: missionFields([
                     .string("reason", "cua_not_ready"),
                     .int("issue_count", self.cuaStatus.issues.count)
-                ],
+                ]),
                 audit: .approval
             )
             lockFunctionalSurfaceForOnboarding()
@@ -763,7 +777,7 @@ final class AURAStore: ObservableObject {
                 .approvalContinueIgnored,
                 category: .approval,
                 traceID: traceID,
-                fields: [.string("reason", "no_pending_approval")],
+                fields: missionFields([.string("reason", "no_pending_approval")]),
                 audit: .approval
             )
             return
@@ -777,7 +791,7 @@ final class AURAStore: ObservableObject {
                 .approvalContinueBlocked,
                 category: .approval,
                 traceID: traceID,
-                fields: [.string("reason", "missing_session_id")],
+                fields: missionFields([.string("reason", "missing_session_id")]),
                 audit: .approval
             )
             clearActiveMissionTrace()
@@ -789,7 +803,7 @@ final class AURAStore: ObservableObject {
                 .approvalContinueBlocked,
                 category: .approval,
                 traceID: traceID,
-                fields: [.string("reason", "read_only_policy")],
+                fields: missionFields([.string("reason", "read_only_policy")]),
                 audit: .approval
             )
             missionStatus = .needsApproval
@@ -825,11 +839,11 @@ final class AURAStore: ObservableObject {
             .approvalContinueLaunchHermes,
             category: .approval,
             traceID: traceID,
-            fields: [
+            fields: missionFields([
                 .string("operation", "approval_result"),
                 .int("approved_chars", pendingApproval.reason.count),
                 .string("toolsets", toolsets.joined(separator: ","))
-            ],
+            ]),
             audit: .approval
         )
         appendMissionOutput("\n\nApproved one pending action. Resuming Hermes...\n")
@@ -838,17 +852,18 @@ final class AURAStore: ObservableObject {
         do {
             try launchHermes(arguments: resumeArguments, environment: Self.hermesEnvironment(
                 for: automationPolicy,
-                cuaActionsAllowed: automationPolicy != .readOnly
+                cuaActionsAllowed: automationPolicy != .readOnly,
+                missionID: activeMissionID
             ), traceID: traceID)
         } catch {
             AURATelemetry.error(
                 .approvalContinueLaunchFailed,
                 category: .approval,
                 traceID: traceID,
-                fields: [
+                fields: missionFields([
                     .string("error_type", String(describing: type(of: error))),
                     .int("duration_ms", AURATelemetry.durationMilliseconds(from: startedAt))
-                ],
+                ]),
                 audit: .approval
             )
             missionStatus = .failed
@@ -867,7 +882,7 @@ final class AURAStore: ObservableObject {
             .approvalDenied,
             category: .approval,
             traceID: traceID,
-            fields: [.string("operation", "approval_decision")],
+            fields: missionFields([.string("operation", "approval_decision")]),
             audit: .approval
         )
         appendMissionOutput("\n\nApproval denied. Mission stopped.")
@@ -885,10 +900,10 @@ final class AURAStore: ObservableObject {
             .missionCancelledByUser,
             category: .mission,
             traceID: traceID,
-            fields: [
+            fields: missionFields([
                 .int32("child_process_id", missionProcess.processIdentifier),
                 .int("duration_ms", self.activeMissionStartedAt.map { AURATelemetry.durationMilliseconds(from: $0) } ?? 0)
-            ],
+            ]),
             audit: .mission
         )
         appendMissionOutput("\nMission cancelled by user.")
@@ -1021,15 +1036,72 @@ final class AURAStore: ObservableObject {
                 .missionOutputChunk,
                 category: .mission,
                 traceID: traceID,
-                fields: [
+                fields: missionFields([
                     .int("chunk_index", self.missionOutputChunkCount),
                     .int("bytes", AURATelemetry.byteCount(chunk))
-                ]
+                ])
             )
         }
         missionOutput += chunk
         lastOutput = missionOutput.trimmingCharacters(in: .whitespacesAndNewlines)
         lastUpdated = Date()
+
+        for line in chunk.components(separatedBy: .newlines) {
+            extractMissionSignal(line)
+        }
+    }
+
+    private func extractMissionSignal(_ rawLine: String) {
+        let line = rawLine.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !line.isEmpty, let traceID = activeMissionTraceID else { return }
+
+        let lowered = line.lowercased()
+        let signalType: String
+        if lowered.hasPrefix("error:")
+            || lowered.hasPrefix("fatal:")
+            || lowered.contains("traceback")
+            || lowered.contains("exception:")
+            || lowered.contains("non-zero exit")
+            || lowered.contains("command failed") {
+            signalType = "error_detected"
+        } else if lowered.contains("delegate_task")
+            || lowered.contains("delegating")
+            || lowered.contains("spawn_agent") {
+            signalType = "delegation"
+        } else if lowered.contains("tool_call")
+            || lowered.contains("calling tool")
+            || lowered.contains("using tool")
+            || lowered.contains("execute_tool") {
+            signalType = "tool_call"
+        } else if lowered.hasPrefix("status:")
+            || lowered.hasPrefix("progress:")
+            || lowered.hasPrefix("completed:") {
+            signalType = "progress"
+        } else {
+            return
+        }
+
+        let fields = missionFields([
+            .string("signal_type", signalType),
+            .int("line_chars", line.count)
+        ])
+
+        if signalType == "error_detected" {
+            AURATelemetry.warning(
+                .missionSignalDetected,
+                category: .mission,
+                traceID: traceID,
+                fields: fields,
+                audit: .mission
+            )
+        } else {
+            AURATelemetry.debug(
+                .missionSignalDetected,
+                category: .mission,
+                traceID: traceID,
+                fields: fields
+            )
+        }
     }
 
     private func hermesChatArguments(
@@ -1081,11 +1153,13 @@ final class AURAStore: ObservableObject {
 
     private static func hermesEnvironment(
         for automationPolicy: GlobalAutomationPolicy,
-        cuaActionsAllowed: Bool
+        cuaActionsAllowed: Bool,
+        missionID: String?
     ) -> [String: String] {
         [
             "AURA_AUTOMATION_POLICY": automationPolicy.rawValue,
-            "AURA_CUA_ALLOW_ACTIONS": cuaActionsAllowed ? "1" : "0"
+            "AURA_CUA_ALLOW_ACTIONS": cuaActionsAllowed ? "1" : "0",
+            "AURA_MISSION_ID": missionID ?? "none"
         ]
     }
 
@@ -1121,7 +1195,7 @@ final class AURAStore: ObservableObject {
                     .hermesSessionCaptured,
                     category: .hermes,
                     traceID: traceID,
-                    fields: [.string("hermes_session_id", parsedSessionID)],
+                    fields: missionFields([.string("hermes_session_id", parsedSessionID)]),
                     audit: .agent
                 )
             }
@@ -1134,10 +1208,10 @@ final class AURAStore: ObservableObject {
                     .missionFinishAfterCancel,
                     category: .mission,
                     traceID: traceID,
-                    fields: [
+                    fields: missionFields([
                         .int32("exit_code", commandResult.exitCode),
                         .int("hermes_duration_ms", commandResult.durationMilliseconds)
-                    ],
+                    ]),
                     audit: .mission
                 )
                 clearActiveMissionTrace()
@@ -1154,40 +1228,57 @@ final class AURAStore: ObservableObject {
                         .missionApprovalGateFailed,
                         category: .approval,
                         traceID: traceID,
-                        fields: [
+                        fields: missionFields([
                             .string("reason", "missing_session_id"),
                             .int32("exit_code", commandResult.exitCode),
                             .int("hermes_duration_ms", commandResult.durationMilliseconds)
-                        ],
+                        ]),
                         audit: .approval
                     )
                     clearActiveMissionTrace()
                 } else {
                     pendingApproval = approvalRequest
                     missionStatus = .needsApproval
+                    logMissionRecoveryOutcomeIfNeeded(
+                        traceID: traceID,
+                        status: "needs_approval",
+                        exitCode: commandResult.exitCode,
+                        hermesDurationMilliseconds: commandResult.durationMilliseconds
+                    )
                     AURATelemetry.info(
                         .missionPausedForApproval,
                         category: .approval,
                         traceID: traceID,
-                        fields: [
+                        fields: missionFields([
                             .string("operation", "approval_intent"),
                             .int32("exit_code", commandResult.exitCode),
                             .int("approval_chars", approvalRequest.reason.count),
                             .int("hermes_duration_ms", commandResult.durationMilliseconds),
                             .int("output_chunks", self.missionOutputChunkCount)
-                        ],
+                        ]),
                         audit: .approval
                     )
                 }
             } else {
+                if !commandResult.succeeded,
+                   attemptMissionRecovery(from: commandResult, traceID: traceID) {
+                    return
+                }
+
                 pendingApproval = nil
                 missionStatus = commandResult.succeeded ? .completed : .failed
                 let missionDuration = activeMissionStartedAt.map { AURATelemetry.durationMilliseconds(from: $0, to: commandResult.finishedAt) } ?? commandResult.durationMilliseconds
+                logMissionRecoveryOutcomeIfNeeded(
+                    traceID: traceID,
+                    status: commandResult.succeeded ? "succeeded" : "failed",
+                    exitCode: commandResult.exitCode,
+                    hermesDurationMilliseconds: commandResult.durationMilliseconds
+                )
                 AURATelemetry.info(
                     .missionFinish,
                     category: .mission,
                     traceID: traceID,
-                    fields: [
+                    fields: missionFields([
                         .string("status", self.missionStatus.title),
                         .int32("exit_code", commandResult.exitCode),
                         .int("mission_duration_ms", missionDuration),
@@ -1195,7 +1286,7 @@ final class AURAStore: ObservableObject {
                         .int("stdout_bytes", commandResult.outputByteCount),
                         .int("stderr_bytes", commandResult.errorByteCount),
                         .int("output_chunks", self.missionOutputChunkCount)
-                    ],
+                    ]),
                     audit: .mission
                 )
                 clearActiveMissionTrace()
@@ -1207,17 +1298,135 @@ final class AURAStore: ObservableObject {
             missionOutput = error.localizedDescription
             lastOutput = missionOutput
             lastUpdated = Date()
+            if missionRetryCount > 0 {
+                AURATelemetry.warning(
+                    .missionRecoveryOutcome,
+                    category: .mission,
+                    traceID: traceID,
+                    fields: missionFields([
+                        .string("status", "failed"),
+                        .int("retry_count", missionRetryCount),
+                        .string("error_type", String(describing: type(of: error)))
+                    ]),
+                    audit: .mission
+                )
+            }
             AURATelemetry.error(
                 .missionFinishFailed,
                 category: .mission,
                 traceID: traceID,
-                fields: [
+                fields: missionFields([
                     .string("error_type", String(describing: type(of: error))),
                     .int("duration_ms", self.activeMissionStartedAt.map { AURATelemetry.durationMilliseconds(from: $0) } ?? 0)
-                ],
+                ]),
                 audit: .mission
             )
             clearActiveMissionTrace()
+        }
+    }
+
+    private func attemptMissionRecovery(from commandResult: HermesCommandResult, traceID: String) -> Bool {
+        guard missionStatus != .cancelled,
+              missionRetryCount == 0,
+              let sessionID = currentHermesSessionID,
+              !sessionID.isEmpty else {
+            return false
+        }
+
+        let diagnostic = Self.failureDiagnostic(
+            exitCode: commandResult.exitCode,
+            stderrTail: String(commandResult.errorOutput.suffix(1_200)),
+            durationMilliseconds: commandResult.durationMilliseconds,
+            outputChunks: missionOutputChunkCount
+        )
+        let toolsets = Self.hermesToolsets(for: automationPolicy)
+        missionRetryCount += 1
+        pendingApproval = nil
+        missionStatus = .running
+        lastCommand = "./script/aura-hermes chat -Q --source aura --resume <session> -t \(toolsets.joined(separator: ",")) -q <failure recovery context>"
+
+        AURATelemetry.info(
+            .missionRecoveryAttempt,
+            category: .mission,
+            traceID: traceID,
+            fields: missionFields([
+                .int("retry_count", missionRetryCount),
+                .int32("original_exit_code", commandResult.exitCode),
+                .int("original_duration_ms", commandResult.durationMilliseconds),
+                .int("stderr_bytes", commandResult.errorByteCount),
+                .int("output_chunks", missionOutputChunkCount),
+                .int("diagnostic_chars", diagnostic.count)
+            ]),
+            audit: .mission
+        )
+        appendMissionOutput("\n\nAURA detected the failed attempt and is asking Hermes to recover once.\n")
+
+        do {
+            try launchHermes(
+                arguments: hermesChatArguments(
+                    query: diagnostic,
+                    resumeSessionID: sessionID,
+                    toolsets: toolsets
+                ),
+                environment: Self.hermesEnvironment(
+                    for: automationPolicy,
+                    cuaActionsAllowed: automationPolicy == .writeAlways,
+                    missionID: activeMissionID
+                ),
+                traceID: traceID
+            )
+            return true
+        } catch {
+            missionStatus = .failed
+            lastOutput = error.localizedDescription
+            lastUpdated = Date()
+            AURATelemetry.error(
+                .missionRecoveryOutcome,
+                category: .mission,
+                traceID: traceID,
+                fields: missionFields([
+                    .string("status", "launch_failed"),
+                    .int("retry_count", missionRetryCount),
+                    .string("error_type", String(describing: type(of: error)))
+                ]),
+                audit: .mission
+            )
+            clearActiveMissionTrace()
+            return true
+        }
+    }
+
+    private func logMissionRecoveryOutcomeIfNeeded(
+        traceID: String,
+        status: String,
+        exitCode: Int32,
+        hermesDurationMilliseconds: Int
+    ) {
+        guard missionRetryCount > 0 else { return }
+
+        let fields = missionFields([
+            .string("status", status),
+            .int("retry_count", missionRetryCount),
+            .int32("exit_code", exitCode),
+            .int("hermes_duration_ms", hermesDurationMilliseconds)
+        ])
+
+        if status == "succeeded" || status == "needs_approval" {
+            AURATelemetry.info(
+                .missionRecoveryOutcome,
+                category: .mission,
+                traceID: traceID,
+                fields: fields,
+                audit: .mission
+            )
+        } else {
+            AURATelemetry.warning(
+                .missionRecoveryOutcome,
+                category: .mission,
+                traceID: traceID,
+                fields: fields,
+                audit: .mission
+            )
         }
     }
 
@@ -1290,10 +1499,10 @@ final class AURAStore: ObservableObject {
                 .hostControlLock,
                 category: .cua,
                 traceID: traceID,
-                fields: [
+                fields: missionFields([
                     .bool("had_mission_process", self.missionProcess != nil),
                     .string("status", self.missionStatus.title)
-                ],
+                ]),
                 audit: .governance
             )
         } else {
@@ -1301,7 +1510,7 @@ final class AURAStore: ObservableObject {
                 .hostControlLockIdle,
                 category: .cua,
                 traceID: traceID,
-                fields: [.string("status", self.missionStatus.title)]
+                fields: missionFields([.string("status", self.missionStatus.title)])
             )
         }
         ambientMissionPanel.hide()
@@ -1325,8 +1534,10 @@ final class AURAStore: ObservableObject {
 
     private func clearActiveMissionTrace() {
         activeMissionTraceID = nil
+        activeMissionID = nil
         activeMissionStartedAt = nil
         missionOutputChunkCount = 0
+        missionRetryCount = 0
     }
 
     private static func missionEnvelope(
@@ -1426,6 +1637,32 @@ final class AURAStore: ObservableObject {
 
         OUTPUT CONTRACT
         Continue with concise progress and end with outcome, artifacts/paths if any, blocked approvals if any, and recommended next action.
+        """
+    }
+
+    private static func failureDiagnostic(
+        exitCode: Int32,
+        stderrTail: String,
+        durationMilliseconds: Int,
+        outputChunks: Int
+    ) -> String {
+        let trimmedError = stderrTail.trimmingCharacters(in: .whitespacesAndNewlines)
+        let safeError = trimmedError.isEmpty ? "No stderr was captured." : trimmedError
+
+        return """
+        AURA RECOVERY CONTEXT
+
+        The previous attempt in this mission failed before completion.
+
+        EXIT CODE: \(exitCode)
+        DURATION: \(durationMilliseconds)ms
+        OUTPUT CHUNKS: \(outputChunks)
+
+        LAST ERROR OUTPUT:
+        \(safeError)
+
+        INSTRUCTIONS:
+        Diagnose what went wrong from this bounded error tail. Do not repeat the same approach. Try one alternative strategy that still respects the AURA mission envelope and approval policy. If the task is impossible or needs user approval, say so clearly.
         """
     }
 

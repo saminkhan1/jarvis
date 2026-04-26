@@ -10,6 +10,7 @@ TMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/aura-e2e.XXXXXX")"
 RUN_APP=1
 
 export AURA_AUDIT_LEDGER_PATH="$TMP_DIR/aura-audit.jsonl"
+export AURA_MISSION_ID="aura-e2e-mission"
 
 cleanup() {
   rm -rf "$TMP_DIR"
@@ -208,17 +209,30 @@ import sys
 path = sys.argv[1]
 events = set()
 raw = ""
+missing_mission_id = []
+cua_timing_errors = []
 with open(path, "r", encoding="utf-8") as fh:
     for line in fh:
         raw += line
-        event = json.loads(line).get("event")
+        payload = json.loads(line)
+        event = payload.get("event")
         if event:
             events.add(event)
+        if payload.get("mission_id") != "aura-e2e-mission":
+            missing_mission_id.append(event or "<unknown>")
+        if event in {"cua_proxy_start", "cua_proxy_stop"} and "duration_ms" not in payload:
+            cua_timing_errors.append(event)
 
 required = {"hermes_wrapper_quiet_start", "hermes_wrapper_quiet_finish"}
 missing = required - events
 if missing:
     raise SystemExit(f"missing audit events: {sorted(missing)}")
+
+if missing_mission_id:
+    raise SystemExit(f"audit entries missing correlated mission_id: {missing_mission_id[:5]}")
+
+if cua_timing_errors:
+    raise SystemExit(f"CUA proxy audit entries missing duration_ms: {cua_timing_errors}")
 
 for forbidden in (
     "Reply exactly: AURA Hermes OK",
