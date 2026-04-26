@@ -87,8 +87,7 @@ final class AURAStore: ObservableObject {
 
     private let hermesService = HermesService()
     private lazy var cuaDriverService = CuaDriverService(hermesService: hermesService)
-    private let cursorIndicator = CursorIndicatorController()
-    private let ambientMissionPanel = AmbientMissionPanelController()
+    private let cursorSurface = CursorSurfaceController()
     private lazy var globalHotKey = GlobalHotKeyController { [weak self] in
         self?.showAmbientEntryPoint()
     }
@@ -276,8 +275,8 @@ final class AURAStore: ObservableObject {
         updateCursorIndicator()
 
         if missionStatus != .running && pendingApproval == nil {
-            missionOutput = "Ambient panel opened. Type or dictate the mission goal, then start Hermes."
-            lastCommand = "ambient shortcut"
+            missionOutput = "Cursor composer opened. Type a mission goal, then press Command-Return."
+            lastCommand = "cursor composer shortcut"
             lastOutput = missionOutput
             lastUpdated = Date()
         }
@@ -305,7 +304,7 @@ final class AURAStore: ObservableObject {
             return
         }
 
-        let traceID = AURATelemetry.makeTraceID(prefix: "panel")
+        let traceID = AURATelemetry.makeTraceID(prefix: "composer")
         AURATelemetry.info(
             .ambientPanelOpenRequested,
             category: .ui,
@@ -316,17 +315,8 @@ final class AURAStore: ObservableObject {
             ]
         )
 
-        if pendingApproval != nil || missionStatus == .running {
-            if !isAmbientEnabled {
-                isAmbientEnabled = true
-            }
-            captureContext(traceID: traceID)
-            updateCursorIndicator()
-        } else {
-            triggerAmbientShortcut()
-        }
-
-        ambientMissionPanel.show(store: self)
+        cursorSurface.presentComposer(using: self)
+        triggerAmbientShortcut()
     }
 
     func refreshCuaStatus(traceID: String = AURATelemetry.makeTraceID(prefix: "cua-refresh")) async {
@@ -682,6 +672,7 @@ final class AURAStore: ObservableObject {
             return
         }
 
+        cursorSurface.collapseToCompact()
         pendingApproval = nil
         currentHermesSessionID = nil
 
@@ -813,6 +804,7 @@ final class AURAStore: ObservableObject {
             return
         }
 
+        cursorSurface.collapseToCompact()
         let snapshot = ContextSnapshot.capture()
         contextSnapshot = snapshot
         logContextCaptured(snapshot, traceID: traceID)
@@ -876,6 +868,7 @@ final class AURAStore: ObservableObject {
 
     func denyPendingApproval() {
         let traceID = activeMissionTraceID ?? AURATelemetry.makeTraceID(prefix: "mission")
+        cursorSurface.collapseToCompact()
         pendingApproval = nil
         missionStatus = .cancelled
         AURATelemetry.info(
@@ -892,6 +885,7 @@ final class AURAStore: ObservableObject {
     func cancelMission() {
         guard let missionProcess, missionStatus == .running else { return }
         let traceID = activeMissionTraceID ?? AURATelemetry.makeTraceID(prefix: "mission")
+        cursorSurface.collapseToCompact()
         missionProcess.terminate()
         self.missionProcess = nil
         pendingApproval = nil
@@ -1220,6 +1214,7 @@ final class AURAStore: ObservableObject {
 
             if let approvalRequest = Self.approvalRequest(in: missionOutput) {
                 if currentHermesSessionID?.isEmpty != false {
+                    cursorSurface.collapseToCompact()
                     pendingApproval = nil
                     missionOutput += "\n\nHermes requested approval but did not return a session_id. AURA cannot resume this mission safely."
                     lastOutput = missionOutput
@@ -1237,6 +1232,7 @@ final class AURAStore: ObservableObject {
                     )
                     clearActiveMissionTrace()
                 } else {
+                    cursorSurface.collapseToCompact()
                     pendingApproval = approvalRequest
                     missionStatus = .needsApproval
                     logMissionRecoveryOutcomeIfNeeded(
@@ -1265,6 +1261,7 @@ final class AURAStore: ObservableObject {
                     return
                 }
 
+                cursorSurface.collapseToCompact()
                 pendingApproval = nil
                 missionStatus = commandResult.succeeded ? .completed : .failed
                 let missionDuration = activeMissionStartedAt.map { AURATelemetry.durationMilliseconds(from: $0, to: commandResult.finishedAt) } ?? commandResult.durationMilliseconds
@@ -1293,6 +1290,7 @@ final class AURAStore: ObservableObject {
             }
         case .failure(let error):
             let traceID = activeMissionTraceID ?? AURATelemetry.makeTraceID(prefix: "mission")
+            cursorSurface.collapseToCompact()
             pendingApproval = nil
             missionStatus = .failed
             missionOutput = error.localizedDescription
@@ -1477,14 +1475,7 @@ final class AURAStore: ObservableObject {
     }
 
     private func updateCursorIndicator() {
-        cursorIndicator.setVisible(isAmbientEnabled && cuaStatus.readyForHostControl)
-        cursorIndicator.update(
-            status: missionStatus,
-            isShortcutActive: isShortcutPulseActive,
-            missionOutput: missionOutput,
-            pendingApprovalTitle: pendingApproval?.title,
-            automationPolicyTitle: automationPolicy.title
-        )
+        cursorSurface.setVisible(isAmbientEnabled && cuaStatus.readyForHostControl, store: self)
     }
 
     private func lockFunctionalSurfaceForOnboarding() {
@@ -1513,7 +1504,7 @@ final class AURAStore: ObservableObject {
                 fields: missionFields([.string("status", self.missionStatus.title)])
             )
         }
-        ambientMissionPanel.hide()
+        cursorSurface.hide()
         isShortcutPulseActive = false
 
         if let missionProcess {

@@ -53,7 +53,7 @@ struct MenuBarContentView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
 
-                Text(store.isAmbientEnabled ? "Cursor indicator on" : "Cursor indicator off")
+                Text(store.isAmbientEnabled ? "Cursor surface on" : "Cursor surface off")
                     .font(.caption)
                     .foregroundStyle(.secondary)
 

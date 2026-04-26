@@ -1,6 +1,6 @@
 # AURA
 
-AURA is a native macOS ambient assistant shell, not a chatbot. It is the menu bar cockpit that opens a cursor-adjacent panel, captures lightweight host context, and routes work to a project-local Hermes runtime plus Cua Driver for host control.
+AURA is a native macOS ambient assistant shell, not a chatbot. It is the menu bar cockpit that expands a cursor-adjacent composer in place, captures lightweight host context, and routes work to a project-local Hermes runtime plus Cua Driver for host control.
 
 - Global hot key: `⌃⌥⌘A`
 - Native shell: SwiftUI + AppKit on macOS 14+
