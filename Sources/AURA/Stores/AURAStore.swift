@@ -92,15 +92,18 @@ final class AURAStore: ObservableObject {
         self?.showAmbientEntryPoint()
     }
     private var missionProcess: Process?
+    private var missionTimeoutTask: Task<Void, Never>?
     private var readinessMonitorTask: Task<Void, Never>?
     private var didRunLaunchOnboarding = false
     private var activeMissionTraceID: String?
     private var activeMissionID: String?
     private var activeMissionStartedAt: Date?
+    private var timedOutMissionTraceID: String?
     private var missionOutputChunkCount = 0
     private var missionRetryCount = 0
     private var lastHostControlReady: Bool?
     private static let automationPolicyKey = "AURAAutomationPolicy"
+    private static let missionTimeoutSeconds: UInt64 = 300
 
     private var activeMissionIDValue: String {
         activeMissionID ?? "none"
@@ -809,7 +812,7 @@ final class AURAStore: ObservableObject {
         contextSnapshot = snapshot
         logContextCaptured(snapshot, traceID: traceID)
 
-        let toolsets = Self.hermesToolsets(for: automationPolicy)
+        let toolsets = Self.hermesToolsetsForApprovedAction(for: automationPolicy)
         let envelope = Self.approvalContinuationEnvelope(
             approvedAction: pendingApproval.reason,
             originalGoal: missionGoal,
@@ -888,6 +891,7 @@ final class AURAStore: ObservableObject {
         cursorSurface.collapseToCompact()
         missionProcess.terminate()
         self.missionProcess = nil
+        cancelMissionTimeout()
         pendingApproval = nil
         missionStatus = .cancelled
         AURATelemetry.info(
@@ -1145,6 +1149,15 @@ final class AURAStore: ObservableObject {
         }
     }
 
+    private static func hermesToolsetsForApprovedAction(for automationPolicy: GlobalAutomationPolicy) -> [String] {
+        switch automationPolicy {
+        case .readOnly:
+            return hermesToolsets(for: .readOnly)
+        case .writePerTask, .writeAlways:
+            return hermesToolsets(for: .writeAlways)
+        }
+    }
+
     private static func hermesEnvironment(
         for automationPolicy: GlobalAutomationPolicy,
         cuaActionsAllowed: Bool,
@@ -1158,7 +1171,7 @@ final class AURAStore: ObservableObject {
     }
 
     private func launchHermes(arguments: [String], environment: [String: String], traceID: String) throws {
-        missionProcess = try hermesService.start(
+        let process = try hermesService.start(
             arguments: arguments,
             environment: environment,
             traceID: traceID,
@@ -1173,9 +1186,18 @@ final class AURAStore: ObservableObject {
                 }
             }
         )
+        missionProcess = process
+        scheduleMissionTimeout(traceID: traceID)
     }
 
     private func finishMission(_ result: Result<HermesCommandResult, Error>) {
+        if case .success(let commandResult) = result,
+           timedOutMissionTraceID == commandResult.traceID {
+            timedOutMissionTraceID = nil
+            return
+        }
+
+        cancelMissionTimeout()
         missionProcess = nil
 
         switch result {
@@ -1321,6 +1343,53 @@ final class AURAStore: ObservableObject {
             )
             clearActiveMissionTrace()
         }
+    }
+
+    private func scheduleMissionTimeout(traceID: String) {
+        cancelMissionTimeout()
+        missionTimeoutTask = Task { [weak self] in
+            do {
+                try await Task.sleep(nanoseconds: Self.missionTimeoutSeconds * 1_000_000_000)
+            } catch {
+                return
+            }
+
+            await MainActor.run {
+                guard let self,
+                      self.missionStatus == .running,
+                      let missionProcess = self.missionProcess
+                else {
+                    return
+                }
+
+                self.timedOutMissionTraceID = traceID
+                missionProcess.terminate()
+                self.missionProcess = nil
+                self.pendingApproval = nil
+                self.missionStatus = .failed
+                self.appendMissionOutput("\nMission timed out after \(Self.missionTimeoutSeconds) seconds and was stopped.")
+                self.lastCommand = "mission timeout"
+                self.lastOutput = self.missionOutput
+                self.lastUpdated = Date()
+                AURATelemetry.error(
+                    .missionTimedOut,
+                    category: .mission,
+                    traceID: traceID,
+                    fields: self.missionFields([
+                        .int32("child_process_id", missionProcess.processIdentifier),
+                        .int("timeout_seconds", Int(Self.missionTimeoutSeconds)),
+                        .int("duration_ms", self.activeMissionStartedAt.map { AURATelemetry.durationMilliseconds(from: $0) } ?? 0)
+                    ]),
+                    audit: .mission
+                )
+                self.clearActiveMissionTrace()
+            }
+        }
+    }
+
+    private func cancelMissionTimeout() {
+        missionTimeoutTask?.cancel()
+        missionTimeoutTask = nil
     }
 
     private func attemptMissionRecovery(from commandResult: HermesCommandResult, traceID: String) -> Bool {
@@ -1524,6 +1593,7 @@ final class AURAStore: ObservableObject {
     }
 
     private func clearActiveMissionTrace() {
+        cancelMissionTimeout()
         activeMissionTraceID = nil
         activeMissionID = nil
         activeMissionStartedAt = nil

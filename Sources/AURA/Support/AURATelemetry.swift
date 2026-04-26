@@ -139,6 +139,7 @@ enum AURATelemetry {
         case missionStartBlocked = "mission_start_blocked"
         case missionStartIgnored = "mission_start_ignored"
         case missionStartRequested = "mission_start_requested"
+        case missionTimedOut = "mission_timed_out"
         case projectFolderOpened = "project_folder_opened"
         case refreshAllFinish = "refresh_all_finish"
         case refreshAllStart = "refresh_all_start"
