@@ -1555,7 +1555,15 @@ final class AURAStore: ObservableObject {
         case .writePerTask:
             localActionRule = "Ask per task. You may analyze, research, plan, draft text, and use CUA read/snapshot tools now. Before any local file write, repository edit, state-changing terminal command, CUA action tool, foreground click/type, or app workflow action, return NEEDS_APPROVAL with the exact proposed task and stop."
         case .writeAlways:
-            localActionRule = "Always allow local writes and host control. You may perform non-destructive local file edits, state-changing terminal work, and CUA computer-use actions when useful. Still stop for destructive, credential-sensitive, external-send, posting, purchase, or financial actions."
+            localActionRule = "Always allow local writes and host control. You may perform local file edits, destructive file operations, state-changing terminal work, and CUA computer-use actions when useful. Still stop for credential-sensitive, external-send, posting, purchase, or financial actions."
+        }
+
+        let safetyHardStops: String
+        switch automationPolicy {
+        case .writeAlways:
+            safetyHardStops = "Return exactly \"NEEDS_APPROVAL: <reason and proposed next action>\" and stop before any action blocked by the global automation policy, external send, posting, purchase, credential-sensitive action, financial action, or foreground takeover not explicitly allowed above."
+        case .readOnly, .writePerTask:
+            safetyHardStops = "Return exactly \"NEEDS_APPROVAL: <reason and proposed next action>\" and stop before any action blocked by the global automation policy, external send, posting, purchase, destructive file operation, credential-sensitive action, financial action, or foreground takeover not explicitly allowed above."
         }
 
         return """
@@ -1588,7 +1596,7 @@ final class AURAStore: ObservableObject {
         - Do not call check_permissions with prompt:true. If CUA reports missing permissions, stop; AURA must return to onboarding.
 
         SAFETY HARD STOPS
-        Return exactly "NEEDS_APPROVAL: <reason and proposed next action>" and stop before any action blocked by the global automation policy, external send, posting, purchase, destructive file operation, credential-sensitive action, financial action, or foreground takeover not explicitly allowed above.
+        \(safetyHardStops)
         Drafting is allowed. Sending or posting is not.
         Do not copy protected creator content. Transform/adapt patterns into original work.
 
@@ -1597,6 +1605,15 @@ final class AURAStore: ObservableObject {
         - Use background delegation when useful, then synthesize child summaries.
         - End with one final packet: outcome, artifacts/paths if any, sources if researched, blocked approvals if any, and recommended next action.
         """
+    }
+
+    private static func approvalSafetyHardStops(for automationPolicy: GlobalAutomationPolicy) -> String {
+        switch automationPolicy {
+        case .writeAlways:
+            return "Even after this approval, stop before any external send, posting, purchase, credential-sensitive action, financial action, or unrelated foreground takeover."
+        case .readOnly, .writePerTask:
+            return "Even after this approval, stop before any external send, posting, purchase, destructive file operation outside the approved action, credential-sensitive action, financial action, or unrelated foreground takeover."
+        }
     }
 
     private static func approvalContinuationEnvelope(
@@ -1633,7 +1650,7 @@ final class AURAStore: ObservableObject {
         - CUA is exposed through AURA's daemon-backed MCP proxy. Never request macOS permissions from workflow.
 
         SAFETY HARD STOPS
-        Even after this approval, stop before any external send, posting, purchase, destructive file operation, credential-sensitive action, financial action, or unrelated foreground takeover.
+        \(approvalSafetyHardStops(for: automationPolicy))
 
         OUTPUT CONTRACT
         Continue with concise progress and end with outcome, artifacts/paths if any, blocked approvals if any, and recommended next action.

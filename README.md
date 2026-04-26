@@ -98,7 +98,7 @@ Global automation policy:
 
 - Read Only: analyze, research, plan, draft, and inspect the screen through CUA read/snapshot tools without writes or host-control actions.
 - Ask Per Task: Hermes can inspect the screen and returns `NEEDS_APPROVAL` before local writes, state-changing commands, CUA actions, or foreground actions.
-- Always Allow: Hermes may perform non-destructive local writes, state-changing terminal work, and CUA host-control actions, while still stopping for destructive, credential-sensitive, financial, purchase, posting, or external-send actions.
+- Always Allow: Hermes may perform local writes, destructive file operations, state-changing terminal work, and CUA host-control actions, while still stopping for credential-sensitive, financial, purchase, posting, or external-send actions.
 
 CUA MCP is registered through `script/aura-cua-mcp`, a daemon-backed proxy. It never exposes `check_permissions` prompt mode during mission workflow; if permissions are revoked, AURA locks back to onboarding.
 
@@ -112,7 +112,7 @@ Using AURA requires:
 4. `cua-driver` registered as a Hermes MCP server.
 5. Global policy set for the intended workflow.
 
-Consequential actions still require a hard stop. Hermes should return `NEEDS_APPROVAL: <reason>` before sends, posts, purchases, destructive file ops, credential-sensitive work, financial actions, or unrelated foreground takeover.
+Consequential actions still require a hard stop. Hermes should return `NEEDS_APPROVAL: <reason>` before sends, posts, purchases, credential-sensitive work, financial actions, or unrelated foreground takeover. Destructive file operations are allowed without a separate prompt only in Always Allow mode.
 
 ## Current CUA Setup
 

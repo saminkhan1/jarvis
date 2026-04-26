@@ -92,6 +92,6 @@ AURA owns the user-visible trust layer.
 - Drafting is allowed, but sending/posting/purchasing/contacting people requires approval.
 - In Read Only mode, local writes and host control are blocked.
 - In Ask Per Task mode, Hermes must return `NEEDS_APPROVAL` before local writes or host control.
-- In Always Allow mode, non-destructive local writes and state-changing terminal work are allowed, but deletes, external messages, foreground takeover, credential handling, and financial actions still require explicit approval.
+- In Always Allow mode, local writes, destructive file operations, state-changing terminal work, and host-control actions are allowed, but external messages, foreground takeover, credential handling, and financial actions still require explicit approval.
 - The model cannot be the final authority on risky actions.
 - Every background task should expose status, logs, cancel, and final artifacts.

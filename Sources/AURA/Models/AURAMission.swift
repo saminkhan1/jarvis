@@ -52,7 +52,7 @@ enum GlobalAutomationPolicy: String, CaseIterable, Identifiable {
         case .writePerTask:
             return "Hermes can inspect the screen and stops with NEEDS_APPROVAL before local writes or host-control actions."
         case .writeAlways:
-            return "Hermes may perform non-destructive local writes and CUA host-control actions without asking each task."
+            return "Hermes may perform local writes, destructive file operations, and CUA host-control actions without asking each task."
         }
     }
 
