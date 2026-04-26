@@ -41,6 +41,8 @@ struct MissionRunnerView: View {
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(.secondary)
 
+            WorkerProjectionView(store: store)
+
             if let approval = store.pendingApproval {
                 ApprovalRequestCard(store: store, approval: approval)
             }
@@ -88,6 +90,16 @@ private struct ApprovalRequestCard: View {
                 .font(.callout)
                 .textSelection(.enabled)
                 .fixedSize(horizontal: false, vertical: true)
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text("Risk: \(approval.risk)")
+                if let target = approval.target {
+                    Text("Target: \(target)")
+                }
+                Text("Scope: \(approval.scope)")
+            }
+            .font(.caption)
+            .foregroundStyle(.secondary)
 
             Text("Hermes config controls whether the approved action is available.")
                 .font(.caption)

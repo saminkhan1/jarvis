@@ -236,6 +236,10 @@ struct CursorSurfaceView: View {
                     .foregroundStyle(.primary)
                     .lineLimit(4)
                     .fixedSize(horizontal: false, vertical: true)
+
+                Text("\(approval.risk) · \(approval.scope)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
 
             Text("Hermes config controls whether the approved action is available.")

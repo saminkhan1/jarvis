@@ -230,6 +230,7 @@ private struct StatusGrid: View {
         LazyVGrid(columns: [GridItem(.adaptive(minimum: 180), spacing: 12)], spacing: 12) {
             StatusTile(title: "Hermes", value: store.healthState.title, systemImage: "bolt.horizontal.circle", color: healthColor)
             StatusTile(title: "Mission", value: store.missionStatus.title, systemImage: "point.3.connected.trianglepath.dotted", color: missionColor)
+            StatusTile(title: "Workers", value: "\(store.workerRuns.count)", systemImage: "square.stack.3d.up", color: workerColor)
             StatusTile(title: "Tools", value: store.hermesToolSurfaceTitle, systemImage: store.hermesToolSurfaceSystemImage, color: .secondary)
             StatusTile(title: "CUA", value: store.cuaStatus.title, systemImage: "display.and.arrow.down", color: store.cuaStatus.readyForHostControl ? .green : .orange)
         }
@@ -263,6 +264,10 @@ private struct StatusGrid: View {
         case .failed:
             return .red
         }
+    }
+
+    private var workerColor: Color {
+        store.workerRuns.contains(where: { $0.status == .needsApproval }) ? .orange : .secondary
     }
 }
 

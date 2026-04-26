@@ -57,6 +57,8 @@ final class AURAStore: ObservableObject {
             updateCursorIndicator()
         }
     }
+    @Published private(set) var workerRuns: [WorkerRun] = []
+    @Published private(set) var artifacts: [AURAArtifact] = []
     @Published private(set) var pendingApproval: ApprovalRequest? {
         didSet {
             updateCursorIndicator()
@@ -672,6 +674,7 @@ final class AURAStore: ObservableObject {
         cursorSurface.collapseToCompact()
         pendingApproval = nil
         currentHermesSessionID = nil
+        resetMissionProjection(goal: trimmedGoal)
 
         let snapshot = missionContextSnapshot(traceID: traceID)
 
@@ -781,6 +784,7 @@ final class AURAStore: ObservableObject {
         }
 
         cursorSurface.collapseToCompact()
+        markApprovalWorkers(status: .running)
         let snapshot = ContextSnapshot.capture()
         contextSnapshot = snapshot
         logContextCaptured(snapshot, traceID: traceID)
@@ -839,6 +843,7 @@ final class AURAStore: ObservableObject {
     func denyPendingApproval() {
         let traceID = activeMissionTraceID ?? AURATelemetry.makeTraceID(prefix: "mission")
         cursorSurface.collapseToCompact()
+        markActiveWorkers(status: .cancelled)
         pendingApproval = nil
         missionStatus = .cancelled
         AURATelemetry.info(
@@ -856,6 +861,7 @@ final class AURAStore: ObservableObject {
         guard let missionProcess, missionStatus == .running else { return }
         let traceID = activeMissionTraceID ?? AURATelemetry.makeTraceID(prefix: "mission")
         cursorSurface.collapseToCompact()
+        markActiveWorkers(status: .cancelled)
         missionProcess.terminate()
         self.missionProcess = nil
         cancelMissionTimeout()
@@ -911,6 +917,52 @@ final class AURAStore: ObservableObject {
             .projectFolderOpened,
             category: .ui,
             fields: [.privateValue("path")]
+        )
+    }
+
+    func openArtifact(_ artifact: AURAArtifact) {
+        guard artifact.exists else {
+            missionOutput += "\n\nArtifact no longer exists at \(artifact.path)"
+            lastOutput = missionOutput
+            lastUpdated = Date()
+            return
+        }
+
+        NSWorkspace.shared.open(artifact.url)
+        AURATelemetry.info(
+            .artifactOpened,
+            category: .ui,
+            fields: [
+                .privateValue("path"),
+                .string("artifact_type", artifact.type.rawValue)
+            ],
+            audit: .action
+        )
+    }
+
+    func revealArtifact(_ artifact: AURAArtifact) {
+        NSWorkspace.shared.activateFileViewerSelecting([artifact.url])
+        AURATelemetry.info(
+            .artifactRevealed,
+            category: .ui,
+            fields: [
+                .privateValue("path"),
+                .string("artifact_type", artifact.type.rawValue)
+            ],
+            audit: .action
+        )
+    }
+
+    func continueWithArtifact(_ artifact: AURAArtifact) {
+        missionGoal = "Continue from this artifact: \(artifact.path)"
+        showAmbientEntryPoint()
+        AURATelemetry.info(
+            .artifactContinued,
+            category: .ui,
+            fields: [
+                .privateValue("path"),
+                .string("artifact_type", artifact.type.rawValue)
+            ]
         )
     }
 
@@ -1013,6 +1065,7 @@ final class AURAStore: ObservableObject {
 
         for line in chunk.components(separatedBy: .newlines) {
             extractMissionSignal(line)
+            ingestArtifactCandidates(in: line)
         }
     }
 
@@ -1052,6 +1105,7 @@ final class AURAStore: ObservableObject {
         ])
 
         if signalType == "error_detected" {
+            updateMissionProjection(signalType: signalType, line: line)
             AURATelemetry.warning(
                 .missionSignalDetected,
                 category: .mission,
@@ -1060,11 +1114,170 @@ final class AURAStore: ObservableObject {
                 audit: .mission
             )
         } else {
+            updateMissionProjection(signalType: signalType, line: line)
             AURATelemetry.debug(
                 .missionSignalDetected,
                 category: .mission,
                 traceID: traceID,
                 fields: fields
+            )
+        }
+    }
+
+    private func resetMissionProjection(goal: String) {
+        let now = Date()
+        let parentID = activeMissionID ?? AURATelemetry.makeSpanID(prefix: "mission")
+        workerRuns = [
+            WorkerRun(
+                id: parentID,
+                title: "Hermes parent",
+                status: .running,
+                domain: .parent,
+                detail: goal,
+                startedAt: now,
+                updatedAt: now,
+                attachedApprovalID: nil,
+                artifactIDs: []
+            )
+        ]
+        artifacts = []
+    }
+
+    private func updateMissionProjection(signalType: String, line: String) {
+        switch signalType {
+        case "delegation":
+            appendDerivedWorker(domain: .delegation, status: .running, title: "Delegated worker", detail: line)
+        case "tool_call":
+            appendDerivedWorker(domain: .tool, status: .running, title: Self.toolTitle(from: line), detail: line)
+        case "progress":
+            updateParentWorker(status: line.lowercased().hasPrefix("completed:") ? .completed : .running, detail: line)
+        case "error_detected":
+            appendDerivedWorker(domain: .progress, status: .failed, title: "Issue detected", detail: line)
+        default:
+            break
+        }
+    }
+
+    private func appendDerivedWorker(domain: WorkerDomain, status: WorkerStatus, title: String, detail: String) {
+        let normalizedDetail = Self.compactProjectionText(detail)
+
+        if let index = workerRuns.indices.last(where: {
+            workerRuns[$0].domain == domain
+                && workerRuns[$0].title == title
+                && workerRuns[$0].detail == normalizedDetail
+        }) {
+            workerRuns[index].status = status
+            workerRuns[index].updatedAt = Date()
+            return
+        }
+
+        let worker = WorkerRun(
+            id: "\(activeMissionIDValue)-\(domain.rawValue)-\(workerRuns.count + 1)",
+            title: title,
+            status: status,
+            domain: domain,
+            detail: normalizedDetail,
+            startedAt: Date(),
+            updatedAt: Date(),
+            attachedApprovalID: nil,
+            artifactIDs: []
+        )
+        workerRuns.append(worker)
+
+        if workerRuns.count > 12 {
+            let parent = workerRuns.first
+            workerRuns = Array(workerRuns.suffix(11))
+            if let parent, !workerRuns.contains(where: { $0.id == parent.id }) {
+                workerRuns.insert(parent, at: 0)
+            }
+        }
+    }
+
+    private func updateParentWorker(status: WorkerStatus, detail: String? = nil) {
+        guard let index = workerRuns.firstIndex(where: { $0.domain == .parent }) else { return }
+        workerRuns[index].status = status
+        if let detail, !detail.isEmpty {
+            workerRuns[index].detail = Self.compactProjectionText(detail)
+        }
+        workerRuns[index].updatedAt = Date()
+    }
+
+    private func markActiveWorkers(status: WorkerStatus) {
+        for index in workerRuns.indices where workerRuns[index].status == .running || workerRuns[index].status == .queued || workerRuns[index].status == .needsApproval {
+            workerRuns[index].status = status
+            workerRuns[index].updatedAt = Date()
+        }
+    }
+
+    private func markApprovalWorkers(status: WorkerStatus) {
+        for index in workerRuns.indices where workerRuns[index].status == .needsApproval {
+            workerRuns[index].status = status
+            workerRuns[index].updatedAt = Date()
+        }
+    }
+
+    private func attachApprovalToProjection(_ approval: ApprovalRequest) -> ApprovalRequest {
+        let workerID: String
+        if let index = workerRuns.indices.last(where: { workerRuns[$0].status == .running && workerRuns[$0].domain != .parent }) {
+            workerID = workerRuns[index].id
+            workerRuns[index].status = .needsApproval
+            workerRuns[index].attachedApprovalID = approval.id
+            workerRuns[index].updatedAt = Date()
+        } else if let index = workerRuns.indices.first(where: { workerRuns[$0].domain == .parent }) {
+            workerID = workerRuns[index].id
+            workerRuns[index].status = .needsApproval
+            workerRuns[index].attachedApprovalID = approval.id
+            workerRuns[index].updatedAt = Date()
+        } else {
+            appendDerivedWorker(domain: .approval, status: .needsApproval, title: "Approval needed", detail: approval.reason)
+            workerID = workerRuns.last?.id ?? activeMissionIDValue
+        }
+
+        return ApprovalRequest(
+            id: approval.id,
+            reason: approval.reason,
+            requestedAt: approval.requestedAt,
+            risk: Self.approvalRisk(from: approval.reason),
+            target: Self.approvalTarget(from: approval.reason),
+            scope: "one-time",
+            attachedWorkerID: workerID
+        )
+    }
+
+    private func ingestArtifactCandidates(in rawLine: String) {
+        for path in Self.artifactPaths(in: rawLine) {
+            let normalizedPath = Self.normalizedArtifactPath(path)
+            guard !normalizedPath.isEmpty,
+                  !artifacts.contains(where: { $0.path == normalizedPath }),
+                  Self.isSafeArtifactPath(normalizedPath) else {
+                continue
+            }
+
+            let ownerID = workerRuns.last(where: { $0.status == .running || $0.status == .completed })?.id
+            let artifact = AURAArtifact(
+                title: URL(fileURLWithPath: normalizedPath).lastPathComponent,
+                path: normalizedPath,
+                type: Self.artifactType(for: normalizedPath),
+                owningWorkerID: ownerID,
+                detectedAt: Date()
+            )
+            artifacts.append(artifact)
+
+            if let ownerID,
+               let index = workerRuns.firstIndex(where: { $0.id == ownerID }) {
+                workerRuns[index].artifactIDs.append(artifact.id)
+                workerRuns[index].updatedAt = Date()
+            }
+
+            AURATelemetry.info(
+                .artifactDetected,
+                category: .mission,
+                traceID: activeMissionTraceID,
+                fields: [
+                    .string("artifact_type", artifact.type.rawValue),
+                    .bool("exists", artifact.exists)
+                ],
+                audit: .action
             )
         }
     }
@@ -1157,6 +1370,7 @@ final class AURAStore: ObservableObject {
                 if currentHermesSessionID?.isEmpty != false {
                     cursorSurface.collapseToCompact()
                     pendingApproval = nil
+                    markActiveWorkers(status: .failed)
                     missionOutput += "\n\nHermes requested approval but did not return a session_id. AURA cannot resume this mission safely."
                     lastOutput = missionOutput
                     missionStatus = .failed
@@ -1174,7 +1388,8 @@ final class AURAStore: ObservableObject {
                     clearActiveMissionTrace()
                 } else {
                     cursorSurface.collapseToCompact()
-                    pendingApproval = approvalRequest
+                    let enrichedApproval = attachApprovalToProjection(approvalRequest)
+                    pendingApproval = enrichedApproval
                     missionStatus = .needsApproval
                     logMissionRecoveryOutcomeIfNeeded(
                         traceID: traceID,
@@ -1205,6 +1420,7 @@ final class AURAStore: ObservableObject {
                 cursorSurface.collapseToCompact()
                 pendingApproval = nil
                 missionStatus = commandResult.succeeded ? .completed : .failed
+                markActiveWorkers(status: commandResult.succeeded ? .completed : .failed)
                 let missionDuration = activeMissionStartedAt.map { AURATelemetry.durationMilliseconds(from: $0, to: commandResult.finishedAt) } ?? commandResult.durationMilliseconds
                 logMissionRecoveryOutcomeIfNeeded(
                     traceID: traceID,
@@ -1233,6 +1449,7 @@ final class AURAStore: ObservableObject {
             let traceID = activeMissionTraceID ?? AURATelemetry.makeTraceID(prefix: "mission")
             cursorSurface.collapseToCompact()
             pendingApproval = nil
+            markActiveWorkers(status: .failed)
             missionStatus = .failed
             missionOutput = error.localizedDescription
             lastOutput = missionOutput
@@ -1286,6 +1503,7 @@ final class AURAStore: ObservableObject {
                 self.missionProcess = nil
                 self.pendingApproval = nil
                 self.missionStatus = .failed
+                self.markActiveWorkers(status: .failed)
                 self.appendMissionOutput("\nMission timed out after \(Self.missionTimeoutSeconds) seconds and was stopped.")
                 self.lastCommand = "mission timeout"
                 self.lastOutput = self.missionOutput
@@ -1625,6 +1843,140 @@ final class AURAStore: ObservableObject {
         INSTRUCTIONS:
         Diagnose what went wrong from this bounded error tail. Do not repeat the same approach. Try one alternative strategy that still respects the AURA mission envelope and Hermes-configured approvals. If the task is impossible or needs user approval, say so clearly.
         """
+    }
+
+    private static func compactProjectionText(_ text: String, limit: Int = 160) -> String {
+        let normalized = text
+            .replacingOccurrences(of: "\r", with: "\n")
+            .components(separatedBy: .whitespacesAndNewlines)
+            .filter { !$0.isEmpty }
+            .joined(separator: " ")
+
+        guard normalized.count > limit else { return normalized }
+        let endIndex = normalized.index(normalized.startIndex, offsetBy: max(0, limit - 3))
+        return String(normalized[..<endIndex]) + "..."
+    }
+
+    private static func toolTitle(from line: String) -> String {
+        let lowered = line.lowercased()
+        let markers = ["calling tool", "using tool", "tool_call", "execute_tool"]
+
+        for marker in markers {
+            guard let range = lowered.range(of: marker) else { continue }
+            let suffix = line[range.upperBound...]
+                .trimmingCharacters(in: CharacterSet(charactersIn: ": -_"))
+            if let first = suffix.components(separatedBy: .whitespacesAndNewlines).first,
+               !first.isEmpty {
+                return "Tool: \(first)"
+            }
+        }
+
+        return "Tool call"
+    }
+
+    private static func approvalRisk(from reason: String) -> String {
+        let lower = reason.lowercased()
+        if lower.contains("send") || lower.contains("post") || lower.contains("message") || lower.contains("email") {
+            return "external send"
+        }
+        if lower.contains("delete") || lower.contains("remove") || lower.contains("overwrite") {
+            return "destructive local change"
+        }
+        if lower.contains("credential") || lower.contains("password") || lower.contains("token") {
+            return "credential-sensitive"
+        }
+        if lower.contains("purchase") || lower.contains("payment") || lower.contains("buy") {
+            return "purchase"
+        }
+        return "local action"
+    }
+
+    private static func approvalTarget(from reason: String) -> String? {
+        let markers = [" at ", " to ", " in ", " on "]
+        for marker in markers {
+            guard let range = reason.lowercased().range(of: marker) else { continue }
+            let suffix = reason[range.upperBound...]
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !suffix.isEmpty else { continue }
+            return compactProjectionText(suffix, limit: 80)
+        }
+        return nil
+    }
+
+    private static func artifactPaths(in rawLine: String) -> [String] {
+        let line = rawLine.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !line.isEmpty else { return [] }
+
+        let pattern = #"(?:(?:~|/)[^\s,;]+|(?:artifacts|artifact|dist|reports|outputs|build|docs|Sources)/[^\s,;]+)"#
+        guard let regex = try? NSRegularExpression(pattern: pattern) else { return [] }
+        let range = NSRange(line.startIndex..<line.endIndex, in: line)
+        return regex.matches(in: line, range: range).compactMap { match in
+            guard let matchRange = Range(match.range, in: line) else { return nil }
+            return cleanArtifactPath(String(line[matchRange]))
+        }
+    }
+
+    private static func cleanArtifactPath(_ path: String) -> String {
+        path
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .trimmingCharacters(in: CharacterSet(charactersIn: "\"'`.,;:)]}"))
+    }
+
+    private static func normalizedArtifactPath(_ path: String) -> String {
+        let cleaned = cleanArtifactPath(path)
+        guard !cleaned.isEmpty else { return "" }
+
+        if cleaned.hasPrefix("~/") {
+            let home = FileManager.default.homeDirectoryForCurrentUser.path
+            return home + "/" + String(cleaned.dropFirst(2))
+        }
+
+        if cleaned.hasPrefix("/") {
+            return cleaned
+        }
+
+        return AURAPaths.projectRoot
+            .appendingPathComponent(cleaned, isDirectory: false)
+            .standardizedFileURL
+            .path
+    }
+
+    private static func isSafeArtifactPath(_ path: String) -> Bool {
+        let standardized = URL(fileURLWithPath: path).standardizedFileURL.path
+        let projectRoot = AURAPaths.projectRoot.standardizedFileURL.path
+
+        if standardized.contains("/.aura/")
+            || standardized.contains("/.build/")
+            || standardized.contains("/.swiftpm/")
+            || standardized.contains("/node_modules/")
+            || standardized.contains("/Library/Logs/") {
+            return false
+        }
+
+        return standardized.hasPrefix(projectRoot)
+            || standardized.hasPrefix(FileManager.default.homeDirectoryForCurrentUser.path)
+    }
+
+    private static func artifactType(for path: String) -> AURAArtifactType {
+        var isDirectory: ObjCBool = false
+        if FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory),
+           isDirectory.boolValue {
+            return path.hasSuffix(".app") ? .app : .folder
+        }
+
+        let ext = URL(fileURLWithPath: path).pathExtension.lowercased()
+        switch ext {
+        case "app":
+            return .app
+        case "csv", "tsv", "xlsx", "xls", "json":
+            return .table
+        case "md", "pdf", "docx", "txt", "html":
+            return .report
+        case "":
+            return .unknown
+        default:
+            return .file
+        }
     }
 
     private static func approvalRequest(in output: String) -> ApprovalRequest? {
