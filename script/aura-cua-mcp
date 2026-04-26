@@ -1,0 +1,434 @@
+#!/usr/bin/env python3
+"""AURA's daemon-backed Cua Driver MCP proxy.
+
+Hermes launches MCP servers as child processes of AURA. Running Cua Driver's
+raw stdio server in that tree can make macOS attribute TCC prompts to AURA.
+This proxy keeps MCP stdio for Hermes, but forwards every CUA tool call to the
+already-onboarded CuaDriver.app daemon over its Unix socket.
+"""
+
+import json
+import os
+import pwd
+import socket
+import subprocess
+import sys
+import time
+from typing import Any
+
+
+USER_HOME = pwd.getpwuid(os.getuid()).pw_dir
+SOCKET_PATH = os.path.expanduser(
+    os.environ.get(
+        "AURA_CUA_DAEMON_SOCKET",
+        os.path.join(USER_HOME, "Library/Caches/cua-driver/cua-driver.sock"),
+    )
+)
+
+READ_ONLY_TOOLS = {
+    "check_permissions",
+    "get_accessibility_tree",
+    "get_agent_cursor_state",
+    "get_config",
+    "get_cursor_position",
+    "get_recording_state",
+    "get_screen_size",
+    "get_window_state",
+    "list_apps",
+    "list_windows",
+    "screenshot",
+    "zoom",
+}
+
+TRUTHY = {"1", "true", "yes", "y", "on"}
+
+
+def telemetry_log(priority: str, event: str, **fields: Any) -> None:
+    if os.environ.get("AURA_TELEMETRY_DISABLED", "").lower() in TRUTHY:
+        return
+
+    severity = "info"
+    if priority.endswith(".err") or priority.endswith(".error"):
+        severity = "error"
+    elif priority.endswith(".warning") or priority.endswith(".warn"):
+        severity = "warning"
+
+    normalized_fields = {}
+    for key, value in fields.items():
+        normalized_key = "tool_name" if key == "tool" else key
+        normalized_fields[normalized_key] = value
+
+    payload = {
+        "schema_version": 1,
+        "event": event,
+        "severity": severity,
+        "app_session_id": os.environ.get("AURA_APP_SESSION_ID", "none"),
+        "trace_id": os.environ.get("AURA_TRACE_ID", "none"),
+        "process_id": os.getpid(),
+        "process_kind": os.environ.get("AURA_PROCESS_KIND", "cua-mcp-proxy"),
+        **normalized_fields,
+    }
+
+    if event.startswith("cua_tool_call"):
+        payload.setdefault("operation", "execute_tool")
+
+    encoded = json.dumps(payload, separators=(",", ":"), sort_keys=True)
+
+    try:
+        subprocess.run(
+            ["/usr/bin/logger", "-p", priority, "-t", "AURA.CUAProxy", encoded],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=1,
+            check=False,
+        )
+    except Exception:
+        pass
+
+    audit_events = {
+        "cua_proxy_start": "governance",
+        "cua_proxy_stop": "governance",
+        "cua_tools_list_finish": "governance",
+        "cua_tools_list_error": "governance",
+        "cua_tool_call_start": "action",
+        "cua_tool_call_finish": "action",
+        "cua_tool_call_bad_arguments": "action",
+    }
+    ledger_path = os.environ.get("AURA_AUDIT_LEDGER_PATH")
+    audit_kind = audit_events.get(event)
+    if ledger_path and audit_kind:
+        audit_payload = {
+            **payload,
+            "recorded_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            "category": "CUA",
+            "audit_kind": audit_kind,
+        }
+        try:
+            os.makedirs(os.path.dirname(ledger_path), exist_ok=True)
+            with open(ledger_path, "a", encoding="utf-8") as fh:
+                fh.write(json.dumps(audit_payload, separators=(",", ":"), sort_keys=True) + "\n")
+        except Exception:
+            pass
+
+
+def duration_ms(started_at: float) -> int:
+    return max(0, round((time.monotonic() - started_at) * 1000))
+
+
+def respond(message_id: Any, result: dict[str, Any]) -> None:
+    write({"jsonrpc": "2.0", "id": message_id, "result": result})
+
+
+def error(message_id: Any, code: int, message: str) -> None:
+    write({"jsonrpc": "2.0", "id": message_id, "error": {"code": code, "message": message}})
+
+
+def write(payload: dict[str, Any]) -> None:
+    sys.stdout.write(json.dumps(payload, separators=(",", ":")) + "\n")
+    sys.stdout.flush()
+
+
+def call_daemon(request: dict[str, Any]) -> dict[str, Any]:
+    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
+        client.connect(SOCKET_PATH)
+        client.sendall(json.dumps(request, separators=(",", ":")).encode("utf-8") + b"\n")
+
+        chunks: list[bytes] = []
+        while True:
+            chunk = client.recv(65536)
+            if not chunk:
+                break
+            chunks.append(chunk)
+            if b"\n" in chunk:
+                break
+
+    raw = b"".join(chunks).split(b"\n", 1)[0]
+    if not raw:
+        raise RuntimeError("Cua Driver daemon returned no response")
+    return json.loads(raw.decode("utf-8"))
+
+
+def tool_result_error(text: str) -> dict[str, Any]:
+    return {
+        "content": [{"type": "text", "text": text}],
+        "isError": True,
+    }
+
+
+def policy() -> str:
+    return os.environ.get("AURA_AUTOMATION_POLICY", "readOnly")
+
+
+def action_tools_allowed() -> bool:
+    return os.environ.get("AURA_CUA_ALLOW_ACTIONS", "").lower() in TRUTHY
+
+
+def tool_allowed(name: str) -> bool:
+    if name in READ_ONLY_TOOLS:
+        return True
+    if policy() == "writeAlways":
+        return True
+    if policy() == "writePerTask" and action_tools_allowed():
+        return True
+    return False
+
+
+def policy_block_result(name: str) -> dict[str, Any]:
+    if policy() == "readOnly":
+        return tool_result_error(
+            f"AURA_CUA_READ_ONLY: CUA tool '{name}' is blocked in Read Only mode."
+        )
+    return tool_result_error(
+        "AURA_CUA_ACTION_REQUIRES_APPROVAL: Return NEEDS_APPROVAL before using "
+        f"CUA action tool '{name}'."
+    )
+
+
+def permissions_ready() -> bool:
+    response = call_daemon(
+        {"method": "call", "name": "check_permissions", "args": {"prompt": False}}
+    )
+    if not response.get("ok"):
+        return False
+
+    payload = response.get("result", {}).get("payload", {})
+    text_parts = [
+        item.get("text", "")
+        for item in payload.get("content", [])
+        if isinstance(item, dict) and item.get("type") == "text"
+    ]
+    text = "\n".join(text_parts).lower()
+    return "accessibility: granted" in text and "screen recording: granted" in text
+
+
+def sanitize_tool(tool: dict[str, Any]) -> dict[str, Any]:
+    if tool.get("name") != "check_permissions":
+        return tool
+
+    sanitized = dict(tool)
+    sanitized["description"] = (
+        "Report CuaDriver.app Accessibility and Screen Recording status. "
+        "AURA never exposes prompt mode during mission workflow."
+    )
+    sanitized["inputSchema"] = {"type": "object", "properties": {}, "additionalProperties": False}
+    return sanitized
+
+
+def list_tools() -> dict[str, Any]:
+    started_at = time.monotonic()
+    response = call_daemon({"method": "list"})
+    if not response.get("ok"):
+        telemetry_log(
+            "user.warning",
+            "cua_tools_list_finish",
+            status="daemon_error",
+            duration_ms=duration_ms(started_at),
+        )
+        return {"tools": []}
+
+    tools = response.get("result", {}).get("payload", [])
+    if not isinstance(tools, list):
+        telemetry_log(
+            "user.warning",
+            "cua_tools_list_finish",
+            status="malformed_response",
+            duration_ms=duration_ms(started_at),
+        )
+        return {"tools": []}
+
+    allowed = [sanitize_tool(tool) for tool in tools if tool_allowed(str(tool.get("name", "")))]
+    telemetry_log(
+        "user.info",
+        "cua_tools_list_finish",
+        status="ok",
+        allowed_count=len(allowed),
+        total_count=len(tools),
+        policy=policy(),
+        actions_allowed=action_tools_allowed(),
+        duration_ms=duration_ms(started_at),
+    )
+    return {"tools": allowed}
+
+
+def call_tool(name: str, args: dict[str, Any]) -> dict[str, Any]:
+    started_at = time.monotonic()
+    current_policy = policy()
+    actions_allowed = action_tools_allowed()
+    allowed = tool_allowed(name)
+    telemetry_log(
+        "user.info",
+        "cua_tool_call_start",
+        tool=name,
+        policy=current_policy,
+        actions_allowed=actions_allowed,
+        allowed=allowed,
+    )
+
+    if not tool_allowed(name):
+        telemetry_log(
+            "user.warning",
+            "cua_tool_call_finish",
+            tool=name,
+            status="policy_blocked",
+            policy=current_policy,
+            duration_ms=duration_ms(started_at),
+        )
+        return policy_block_result(name)
+
+    if name == "check_permissions":
+        args = {}
+    else:
+        try:
+            has_permissions = permissions_ready()
+        except Exception as exc:
+            telemetry_log(
+                "user.err",
+                "cua_tool_call_finish",
+                tool=name,
+                status="daemon_unavailable",
+                phase="permission_check",
+                error_type=type(exc).__name__,
+                duration_ms=duration_ms(started_at),
+            )
+            raise
+
+        if not has_permissions:
+            telemetry_log(
+                "user.warning",
+                "cua_tool_call_finish",
+                tool=name,
+                status="setup_required",
+                policy=current_policy,
+                duration_ms=duration_ms(started_at),
+            )
+            return tool_result_error(
+                "AURA_CUA_SETUP_REQUIRED: Cua Driver permissions are missing or revoked. "
+                "AURA must return to onboarding; do not request permissions inline."
+            )
+
+    try:
+        response = call_daemon({"method": "call", "name": name, "args": args})
+    except Exception as exc:
+        telemetry_log(
+            "user.err",
+            "cua_tool_call_finish",
+            tool=name,
+            status="daemon_unavailable",
+            error_type=type(exc).__name__,
+            duration_ms=duration_ms(started_at),
+        )
+        raise
+
+    if not response.get("ok"):
+        telemetry_log(
+            "user.err",
+            "cua_tool_call_finish",
+            tool=name,
+            status="daemon_error",
+            duration_ms=duration_ms(started_at),
+        )
+        return tool_result_error(f"AURA_CUA_DAEMON_ERROR: {response.get('error', 'unknown error')}")
+
+    payload = response.get("result", {}).get("payload", {})
+    if not isinstance(payload, dict):
+        telemetry_log(
+            "user.err",
+            "cua_tool_call_finish",
+            tool=name,
+            status="malformed_response",
+            duration_ms=duration_ms(started_at),
+        )
+        return tool_result_error("AURA_CUA_DAEMON_ERROR: malformed Cua Driver response")
+
+    telemetry_log(
+        "user.info",
+        "cua_tool_call_finish",
+        tool=name,
+        status="ok",
+        policy=current_policy,
+        duration_ms=duration_ms(started_at),
+    )
+    return payload
+
+
+def handle(message: dict[str, Any]) -> None:
+    method = message.get("method")
+    message_id = message.get("id")
+
+    if method == "initialize":
+        params = message.get("params") or {}
+        telemetry_log("user.info", "cua_proxy_initialized", protocol=params.get("protocolVersion", "unknown"))
+        respond(
+            message_id,
+            {
+                "protocolVersion": params.get("protocolVersion", "2024-11-05"),
+                "capabilities": {"tools": {"listChanged": False}},
+                "serverInfo": {"name": "aura-cua-driver", "version": "0.1.0"},
+            },
+        )
+        return
+
+    if method == "notifications/initialized":
+        return
+
+    if method == "ping":
+        respond(message_id, {})
+        return
+
+    if method == "tools/list":
+        try:
+            respond(message_id, list_tools())
+        except Exception as exc:
+            telemetry_log("user.err", "cua_tools_list_error", error_type=type(exc).__name__)
+            error(message_id, -32000, f"CUA daemon unavailable: {exc}")
+        return
+
+    if method == "tools/call":
+        params = message.get("params") or {}
+        name = str(params.get("name", ""))
+        args = params.get("arguments") or {}
+        if not isinstance(args, dict):
+            telemetry_log("user.warning", "cua_tool_call_bad_arguments", tool=name)
+            respond(message_id, tool_result_error("AURA_CUA_BAD_ARGUMENTS: tool arguments must be an object"))
+            return
+
+        try:
+            respond(message_id, call_tool(name, args))
+        except Exception as exc:
+            respond(message_id, tool_result_error(f"AURA_CUA_DAEMON_UNAVAILABLE: {exc}"))
+        return
+
+    if message_id is not None:
+        error(message_id, -32601, f"Method not found: {method}")
+
+
+def main() -> int:
+    telemetry_log(
+        "user.info",
+        "cua_proxy_start",
+        socket_path=SOCKET_PATH,
+        policy=policy(),
+        actions_allowed=action_tools_allowed(),
+    )
+
+    for raw in sys.stdin:
+        line = raw.strip()
+        if not line:
+            continue
+
+        try:
+            message = json.loads(line)
+        except json.JSONDecodeError as exc:
+            telemetry_log("user.warning", "cua_proxy_invalid_json", error_type=type(exc).__name__)
+            sys.stderr.write(f"Invalid JSON-RPC message: {exc}\n")
+            sys.stderr.flush()
+            continue
+
+        handle(message)
+
+    telemetry_log("user.info", "cua_proxy_stop")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

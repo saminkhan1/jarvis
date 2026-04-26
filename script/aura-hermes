@@ -1,0 +1,189 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+HERMES_AGENT_DIR="$ROOT_DIR/.aura/hermes-agent"
+HERMES_PYTHON="$HERMES_AGENT_DIR/venv/bin/python3"
+
+telemetry_log() {
+  local priority="$1"
+  local event="$2"
+  shift 2
+
+  local severity="info"
+  case "$priority" in
+    *.err|*.error)
+      severity="error"
+      ;;
+    *.warning|*.warn)
+      severity="warning"
+      ;;
+  esac
+
+  local payload
+  payload="$(
+    /usr/bin/python3 - "$event" "$severity" "$$" "$@" <<'PY'
+import json
+import os
+import sys
+import time
+
+event = sys.argv[1]
+severity = sys.argv[2]
+pid = int(sys.argv[3])
+fields = {}
+
+for item in sys.argv[4:]:
+    if "=" not in item:
+        continue
+    key, value = item.split("=", 1)
+    if value.lower() in {"true", "false"}:
+        fields[key] = value.lower() == "true"
+    else:
+        try:
+            fields[key] = int(value)
+        except ValueError:
+            fields[key] = value
+
+payload = {
+    "schema_version": 1,
+    "event": event,
+    "severity": severity,
+    "app_session_id": os.environ.get("AURA_APP_SESSION_ID", "none"),
+    "trace_id": os.environ.get("AURA_TRACE_ID", "none"),
+    "process_id": pid,
+    "process_kind": os.environ.get("AURA_PROCESS_KIND", "wrapper"),
+    **fields,
+}
+print(json.dumps(payload, separators=(",", ":"), sort_keys=True))
+
+ledger_path = os.environ.get("AURA_AUDIT_LEDGER_PATH")
+if ledger_path and event in {
+    "hermes_wrapper_missing_python",
+    "hermes_wrapper_quiet_start",
+    "hermes_wrapper_quiet_finish",
+    "hermes_wrapper_exec",
+}:
+    audit = dict(payload)
+    audit["recorded_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    audit["category"] = "Hermes"
+    audit["audit_kind"] = "agent"
+    os.makedirs(os.path.dirname(ledger_path), exist_ok=True)
+    with open(ledger_path, "a", encoding="utf-8") as fh:
+        fh.write(json.dumps(audit, separators=(",", ":"), sort_keys=True) + "\n")
+PY
+  )"
+
+  if command -v logger >/dev/null 2>&1; then
+    logger -p "$priority" -t AURA.Hermes "$payload"
+  fi
+}
+
+if [[ ! -x "$HERMES_PYTHON" ]]; then
+  HERMES_PYTHON="$HERMES_AGENT_DIR/venv/bin/python"
+fi
+
+if [[ ! -x "$HERMES_PYTHON" ]]; then
+  telemetry_log user.err hermes_wrapper_missing_python path_kind=project_local_hermes_python
+  echo "Missing project-local Hermes Python at $HERMES_AGENT_DIR/venv/bin/python3" >&2
+  echo "Run: .aura/hermes-agent/setup-hermes.sh" >&2
+  exit 127
+fi
+
+export HOME="$ROOT_DIR/.aura/home"
+export HERMES_HOME="$ROOT_DIR/.aura/hermes-home"
+export VIRTUAL_ENV="$HERMES_AGENT_DIR/venv"
+export PATH="$VIRTUAL_ENV/bin:$PATH"
+export PYTHONPATH="$HERMES_AGENT_DIR${PYTHONPATH:+:$PYTHONPATH}"
+export PYTHONNOUSERSITE=1
+
+is_quiet_chat=0
+session_source=""
+operation="${1:-none}"
+if [[ "${1:-}" == "chat" ]]; then
+  operation="chat.start"
+  args=("$@")
+  for ((i = 0; i < ${#args[@]}; i++)); do
+    case "${args[$i]}" in
+      -Q|--quiet)
+        is_quiet_chat=1
+        ;;
+      --source)
+        if (( i + 1 < ${#args[@]} )); then
+          session_source="${args[$((i + 1))]}"
+        fi
+        ;;
+      --source=*)
+        session_source="${args[$i]#--source=}"
+        ;;
+      --resume)
+        operation="chat.resume"
+        ;;
+    esac
+  done
+fi
+
+close_quiet_session() {
+  local output_file="$1"
+  local error_file="$2"
+  local session_id
+
+  session_id="$(
+    awk -F': *' 'tolower($1) == "session_id" { print $2; exit }' \
+      "$error_file" "$output_file" | tr -d '\r'
+  )"
+
+  if [[ -z "$session_id" || ! "$session_id" =~ ^[A-Za-z0-9_-]+$ ]]; then
+    return 0
+  fi
+
+  if [[ ! -f "$HERMES_HOME/state.db" ]]; then
+    return 0
+  fi
+
+  if [[ -n "$session_source" && "$session_source" =~ ^[A-Za-z0-9_.:-]+$ ]]; then
+    sqlite3 "$HERMES_HOME/state.db" \
+      "UPDATE sessions SET source = '$session_source' WHERE id = '$session_id' AND source = 'cli';" \
+      >/dev/null 2>&1 || true
+  fi
+
+  sqlite3 "$HERMES_HOME/state.db" \
+    "UPDATE sessions SET ended_at = COALESCE((SELECT MAX(timestamp) FROM messages WHERE messages.session_id = sessions.id), strftime('%s','now')), end_reason = COALESCE(end_reason, 'aura_quiet_close') WHERE id = '$session_id' AND ended_at IS NULL;" \
+    >/dev/null 2>&1 || true
+}
+
+if [[ "$is_quiet_chat" == "1" ]]; then
+  started_epoch_ms="$(/usr/bin/python3 -c 'import time; print(round(time.time() * 1000))')"
+  telemetry_log user.info hermes_wrapper_quiet_start operation="$operation" source="${session_source:-none}"
+
+  stdout_file="$(mktemp "${TMPDIR:-/tmp}/aura-hermes-stdout.XXXXXX")"
+  stderr_file="$(mktemp "${TMPDIR:-/tmp}/aura-hermes-stderr.XXXXXX")"
+  cleanup() {
+    rm -f "$stdout_file" "$stderr_file"
+  }
+  trap cleanup EXIT
+
+  set +e
+  "$HERMES_PYTHON" -m hermes_cli.main "$@" >"$stdout_file" 2>"$stderr_file"
+  status=$?
+  set -e
+
+  cat "$stdout_file"
+  cat "$stderr_file" >&2
+  close_quiet_session "$stdout_file" "$stderr_file"
+  session_id="$(
+    awk -F': *' 'tolower($1) == "session_id" { print $2; exit }' \
+      "$stderr_file" "$stdout_file" | tr -d '\r'
+  )"
+  finished_epoch_ms="$(/usr/bin/python3 -c 'import time; print(round(time.time() * 1000))')"
+  duration_ms="$((finished_epoch_ms - started_epoch_ms))"
+  if [[ "$status" == "0" ]]; then
+    telemetry_log user.info hermes_wrapper_quiet_finish operation="$operation" exit_code="$status" duration_ms="$duration_ms" hermes_session_id="${session_id:-none}"
+  else
+    telemetry_log user.err hermes_wrapper_quiet_finish operation="$operation" exit_code="$status" duration_ms="$duration_ms" hermes_session_id="${session_id:-none}"
+  fi
+  exit "$status"
+fi
+
+telemetry_log user.info hermes_wrapper_exec operation="$operation" source="${session_source:-none}"
+exec "$HERMES_PYTHON" -m hermes_cli.main "$@"

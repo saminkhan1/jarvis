@@ -1,0 +1,19 @@
+.DS_Store
+
+# AURA-local Hermes install, state, logs, secrets, and generated artifacts.
+.aura/
+
+# Local environment/secrets files.
+.env
+.env.*
+!.env.example
+
+# Build and generated outputs.
+.build/
+.codex/
+.swiftpm/
+__pycache__/
+*.pyc
+dist/
+DerivedData/
+*.log
