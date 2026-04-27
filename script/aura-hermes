@@ -128,12 +128,21 @@ fi
 close_quiet_session() {
   local output_file="$1"
   local error_file="$2"
+  local started_epoch_seconds="${3:-0}"
   local session_id
 
   session_id="$(
     awk -F': *' 'tolower($1) == "session_id" { print $2; exit }' \
       "$error_file" "$output_file" | tr -d '\r'
   )"
+
+  if [[ -z "$session_id" && -f "$HERMES_HOME/state.db" && "$started_epoch_seconds" =~ ^[0-9]+$ ]]; then
+    session_id="$(
+      sqlite3 "$HERMES_HOME/state.db" \
+        "SELECT id FROM sessions WHERE source = 'cli' AND parent_session_id IS NULL AND ended_at IS NULL AND started_at >= $started_epoch_seconds ORDER BY started_at ASC LIMIT 1;" \
+        2>/dev/null || true
+    )"
+  fi
 
   if [[ -z "$session_id" || ! "$session_id" =~ ^[A-Za-z0-9_-]+$ ]]; then
     return 0
@@ -145,12 +154,12 @@ close_quiet_session() {
 
   if [[ -n "$session_source" && "$session_source" =~ ^[A-Za-z0-9_.:-]+$ ]]; then
     sqlite3 "$HERMES_HOME/state.db" \
-      "UPDATE sessions SET source = '$session_source' WHERE id = '$session_id' AND source = 'cli';" \
+      "WITH RECURSIVE tree(id) AS (SELECT '$session_id' UNION ALL SELECT sessions.id FROM sessions JOIN tree ON sessions.parent_session_id = tree.id) UPDATE sessions SET source = '$session_source' WHERE id IN (SELECT id FROM tree) AND source = 'cli';" \
       >/dev/null 2>&1 || true
   fi
 
   sqlite3 "$HERMES_HOME/state.db" \
-    "UPDATE sessions SET ended_at = COALESCE((SELECT MAX(timestamp) FROM messages WHERE messages.session_id = sessions.id), strftime('%s','now')), end_reason = COALESCE(end_reason, 'aura_quiet_close') WHERE id = '$session_id' AND ended_at IS NULL;" \
+    "WITH RECURSIVE tree(id) AS (SELECT '$session_id' UNION ALL SELECT sessions.id FROM sessions JOIN tree ON sessions.parent_session_id = tree.id) UPDATE sessions SET ended_at = COALESCE((SELECT MAX(timestamp) FROM messages WHERE messages.session_id = sessions.id), strftime('%s','now')), end_reason = COALESCE(end_reason, 'aura_quiet_close') WHERE id IN (SELECT id FROM tree) AND ended_at IS NULL;" \
     >/dev/null 2>&1 || true
 }
 
@@ -179,45 +188,165 @@ else:
             print(f"    → {detail}")
 
 print("  → CLI commands: /voice status, /voice on, /voice off, /voice tts")
-print("  → AURA opens project-local Hermes only; it does not capture, transcribe, or store audio.")
+print("  → AURA can capture in-app microphone audio and passes a temporary WAV to project-local Hermes for STT.")
 PY
+}
+
+should_log_wrapper_exec() {
+  [[ "${AURA_SKIP_WRAPPER_EXEC_TELEMETRY:-0}" != "1" ]]
 }
 
 if [[ "$is_quiet_chat" == "1" ]]; then
   started_epoch_ms="$(/usr/bin/python3 -c 'import time; print(round(time.time() * 1000))')"
+  started_epoch_seconds="$((started_epoch_ms / 1000))"
   telemetry_log user.info hermes_wrapper_quiet_start operation="$operation" source="${session_source:-none}"
 
   stdout_file="$(mktemp "${TMPDIR:-/tmp}/aura-hermes-stdout.XXXXXX")"
   stderr_file="$(mktemp "${TMPDIR:-/tmp}/aura-hermes-stderr.XXXXXX")"
+  child_pid=""
+  killer_pid=""
+  termination_reason="completed"
+  emitted_output=0
+
   cleanup() {
     rm -f "$stdout_file" "$stderr_file"
   }
   trap cleanup EXIT
 
+  signal_exit_code() {
+    case "$1" in
+      INT) echo 130 ;;
+      HUP) echo 129 ;;
+      TERM|*) echo 143 ;;
+    esac
+  }
+
+  request_child_termination() {
+    local signal_name="$1"
+    termination_reason="signal_${signal_name}"
+    trap - INT TERM HUP
+
+    if [[ -n "$child_pid" ]]; then
+      kill -TERM "$child_pid" >/dev/null 2>&1 || true
+      (
+        sleep 15
+        if kill -0 "$child_pid" >/dev/null 2>&1; then
+          kill -KILL "$child_pid" >/dev/null 2>&1 || true
+        fi
+      ) &
+      killer_pid="$!"
+    fi
+  }
+
+  emit_quiet_output_once() {
+    if [[ "$emitted_output" == "1" ]]; then
+      return 0
+    fi
+
+    emitted_output=1
+    cat "$stdout_file"
+    cat "$stderr_file" >&2
+  }
+
+  finish_quiet_chat() {
+    local status="$1"
+    local session_id
+    local finished_epoch_ms
+    local duration_ms
+
+    emit_quiet_output_once
+    close_quiet_session "$stdout_file" "$stderr_file" "$started_epoch_seconds"
+    session_id="$(
+      awk -F': *' 'tolower($1) == "session_id" { print $2; exit }' \
+        "$stderr_file" "$stdout_file" | tr -d '\r'
+    )"
+    if [[ -z "$session_id" && -f "$HERMES_HOME/state.db" ]]; then
+      session_id="$(
+        sqlite3 "$HERMES_HOME/state.db" \
+          "SELECT id FROM sessions WHERE parent_session_id IS NULL AND started_at >= $started_epoch_seconds ORDER BY started_at ASC LIMIT 1;" \
+          2>/dev/null || true
+      )"
+    fi
+    finished_epoch_ms="$(/usr/bin/python3 -c 'import time; print(round(time.time() * 1000))')"
+    duration_ms="$((finished_epoch_ms - started_epoch_ms))"
+    if [[ "$status" == "0" ]]; then
+      telemetry_log user.info hermes_wrapper_quiet_finish operation="$operation" exit_code="$status" duration_ms="$duration_ms" hermes_session_id="${session_id:-none}" termination_reason="$termination_reason"
+    else
+      telemetry_log user.err hermes_wrapper_quiet_finish operation="$operation" exit_code="$status" duration_ms="$duration_ms" hermes_session_id="${session_id:-none}" termination_reason="$termination_reason"
+    fi
+  }
+
+  trap 'request_child_termination INT' INT
+  trap 'request_child_termination TERM' TERM
+  trap 'request_child_termination HUP' HUP
+
   set +e
-  "$HERMES_PYTHON" -m hermes_cli.main "$@" >"$stdout_file" 2>"$stderr_file"
+  "$HERMES_PYTHON" -m hermes_cli.main "$@" >"$stdout_file" 2>"$stderr_file" &
+  child_pid="$!"
+  wait "$child_pid"
   status=$?
+  if [[ "$termination_reason" == signal_* ]]; then
+    wait "$child_pid" >/dev/null 2>&1
+    child_status="$?"
+    if [[ "$child_status" != "0" ]]; then
+      status="$child_status"
+    else
+      status="$(signal_exit_code "${termination_reason#signal_}")"
+    fi
+  elif (( status >= 128 )); then
+    termination_reason="child_signal_$((status - 128))"
+  fi
+  if [[ -n "$killer_pid" ]]; then
+    kill "$killer_pid" >/dev/null 2>&1 || true
+    wait "$killer_pid" >/dev/null 2>&1 || true
+  fi
   set -e
 
-  cat "$stdout_file"
-  cat "$stderr_file" >&2
-  close_quiet_session "$stdout_file" "$stderr_file"
-  session_id="$(
-    awk -F': *' 'tolower($1) == "session_id" { print $2; exit }' \
-      "$stderr_file" "$stdout_file" | tr -d '\r'
-  )"
-  finished_epoch_ms="$(/usr/bin/python3 -c 'import time; print(round(time.time() * 1000))')"
-  duration_ms="$((finished_epoch_ms - started_epoch_ms))"
-  if [[ "$status" == "0" ]]; then
-    telemetry_log user.info hermes_wrapper_quiet_finish operation="$operation" exit_code="$status" duration_ms="$duration_ms" hermes_session_id="${session_id:-none}"
-  else
-    telemetry_log user.err hermes_wrapper_quiet_finish operation="$operation" exit_code="$status" duration_ms="$duration_ms" hermes_session_id="${session_id:-none}"
-  fi
+  finish_quiet_chat "$status"
   exit "$status"
 fi
 
+if [[ "${1:-}" == "aura-transcribe-audio" ]]; then
+  audio_path="${2:-}"
+  if [[ -z "$audio_path" || ! -f "$audio_path" ]]; then
+    echo "usage: ./script/aura-hermes aura-transcribe-audio <audio-file>" >&2
+    exit 2
+  fi
+
+  if should_log_wrapper_exec; then
+    telemetry_log user.info hermes_wrapper_exec operation="voice.transcribe" source="${session_source:-none}"
+  fi
+  "$HERMES_PYTHON" - "$audio_path" <<'PY'
+import json
+import os
+import sys
+from pathlib import Path
+
+audio_path = sys.argv[1]
+try:
+    from hermes_cli.env_loader import load_hermes_dotenv
+
+    project_root = Path(os.environ.get("AURA_PROJECT_ROOT", "."))
+    load_hermes_dotenv(project_env=project_root / ".env")
+
+    from tools.voice_mode import transcribe_recording
+
+    result = transcribe_recording(audio_path)
+except Exception as exc:
+    result = {
+        "success": False,
+        "error": f"{type(exc).__name__}: {exc}",
+    }
+
+print(json.dumps(result, separators=(",", ":"), sort_keys=True))
+PY
+  exit $?
+fi
+
 if [[ "${1:-}" == "doctor" ]]; then
-  telemetry_log user.info hermes_wrapper_exec operation="$operation" source="${session_source:-none}"
+  if should_log_wrapper_exec; then
+    telemetry_log user.info hermes_wrapper_exec operation="$operation" source="${session_source:-none}"
+  fi
   set +e
   "$HERMES_PYTHON" -m hermes_cli.main "$@"
   status=$?
@@ -226,5 +355,7 @@ if [[ "${1:-}" == "doctor" ]]; then
   exit "$status"
 fi
 
-telemetry_log user.info hermes_wrapper_exec operation="$operation" source="${session_source:-none}"
+if should_log_wrapper_exec; then
+  telemetry_log user.info hermes_wrapper_exec operation="$operation" source="${session_source:-none}"
+fi
 exec "$HERMES_PYTHON" -m hermes_cli.main "$@"

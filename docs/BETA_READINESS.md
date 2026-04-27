@@ -8,7 +8,7 @@ This is the current checklist before AURA can go to beta users.
 - Real e2e verification passes with project-local Hermes.
 - CUA Driver is installed on this machine, running through a user LaunchAgent, and registered with project-local Hermes MCP.
 - First launch now runs passive CUA readiness checks and locks AURA into onboarding until Cua Driver is installed, daemonized, permissioned, and registered. Permission prompts are only user-clicked from onboarding, use Cua Driver's explicit prompt mode, and never run from the mission workflow.
-- Normal Hermes missions use project-local Hermes config for tool exposure, including the `cua-driver` MCP registered as `script/aura-cua-mcp`. AURA no longer passes per-mission toolsets or CUA policy env gates.
+- Normal Hermes missions use project-local Hermes config for tool exposure, including the `cua-driver` MCP registered as `script/aura-cua-mcp`. AURA no longer passes per-mission toolsets or CUA policy env gates, and MVP missions run with `--yolo`.
 - The dashboard now exposes mission input mode, Hermes config type, and a
   Readiness Center backed by project-local Hermes CLI checks.
 - `script/connection_matrix.sh` verifies the report connection packs against

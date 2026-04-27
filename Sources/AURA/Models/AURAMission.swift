@@ -3,7 +3,6 @@ import Foundation
 
 enum MissionStatus {
     case idle
-    case needsApproval
     case running
     case completed
     case failed
@@ -13,8 +12,6 @@ enum MissionStatus {
         switch self {
         case .idle:
             return "Idle"
-        case .needsApproval:
-            return "Needs approval"
         case .running:
             return "Running"
         case .completed:
@@ -47,7 +44,7 @@ enum MissionInputMode: String, CaseIterable, Identifiable {
         case .text:
             return "The mission hotkey opens AURA's text composer."
         case .voice:
-            return "The mission hotkey opens project-local Hermes Voice Mode and enables /voice on. Hermes owns microphone capture, STT, and TTS."
+            return "The mission hotkey opens AURA's in-app audio input. AURA records locally, then project-local Hermes transcribes the request."
         }
     }
 
@@ -70,176 +67,110 @@ enum MissionInputMode: String, CaseIterable, Identifiable {
     }
 }
 
-struct ApprovalRequest: Identifiable {
-    let id: UUID
-    let reason: String
-    let requestedAt: Date
-    let risk: String
-    let target: String?
-    let scope: String
-    let attachedWorkerID: String?
-
-    init(
-        id: UUID = UUID(),
-        reason: String,
-        requestedAt: Date,
-        risk: String = "approval",
-        target: String? = nil,
-        scope: String = "one-time",
-        attachedWorkerID: String? = nil
-    ) {
-        self.id = id
-        self.reason = reason
-        self.requestedAt = requestedAt
-        self.risk = risk
-        self.target = target
-        self.scope = scope
-        self.attachedWorkerID = attachedWorkerID
-    }
-
-    var title: String {
-        reason.isEmpty ? "Hermes needs approval" : reason
-    }
-}
-
-enum WorkerStatus: String {
-    case queued
-    case running
-    case needsApproval
-    case completed
+enum VoiceInputState: Equatable {
+    case idle
+    case requestingPermission
+    case recording
+    case transcribing
+    case ready
     case failed
-    case cancelled
 
     var title: String {
         switch self {
-        case .queued:
-            return "Queued"
-        case .running:
-            return "Running"
-        case .needsApproval:
-            return "Needs approval"
-        case .completed:
-            return "Done"
+        case .idle:
+            return "Tap to listen"
+        case .requestingPermission:
+            return "Checking microphone"
+        case .recording:
+            return "Listening"
+        case .transcribing:
+            return "Transcribing"
+        case .ready:
+            return "Transcript ready"
         case .failed:
-            return "Failed"
-        case .cancelled:
-            return "Cancelled"
-        }
-    }
-}
-
-enum WorkerDomain: String {
-    case parent
-    case delegation
-    case tool
-    case progress
-    case approval
-    case artifact
-
-    var title: String {
-        switch self {
-        case .parent:
-            return "Parent"
-        case .delegation:
-            return "Worker"
-        case .tool:
-            return "Tool"
-        case .progress:
-            return "Progress"
-        case .approval:
-            return "Approval"
-        case .artifact:
-            return "Artifact"
+            return "Voice input failed"
         }
     }
 
     var systemImage: String {
         switch self {
-        case .parent:
-            return "point.3.connected.trianglepath.dotted"
-        case .delegation:
-            return "person.2"
-        case .tool:
-            return "wrench.and.screwdriver"
-        case .progress:
-            return "arrow.triangle.2.circlepath"
-        case .approval:
-            return "hand.raised"
-        case .artifact:
-            return "doc"
+        case .idle, .ready:
+            return "mic.circle"
+        case .requestingPermission:
+            return "lock.circle"
+        case .recording:
+            return "waveform.circle.fill"
+        case .transcribing:
+            return "text.bubble"
+        case .failed:
+            return "exclamationmark.triangle"
+        }
+    }
+
+    var isBusy: Bool {
+        switch self {
+        case .requestingPermission, .recording, .transcribing:
+            return true
+        case .idle, .ready, .failed:
+            return false
         }
     }
 }
 
-struct WorkerRun: Identifiable {
-    let id: String
-    var title: String
-    var status: WorkerStatus
-    var domain: WorkerDomain
-    var detail: String
-    let startedAt: Date
-    var updatedAt: Date
-    var attachedApprovalID: UUID?
-    var artifactIDs: [UUID]
-}
-
-enum AURAArtifactType: String {
-    case file
-    case folder
-    case app
-    case report
-    case table
+enum MicrophonePermissionStatus: Equatable {
     case unknown
+    case notDetermined
+    case granted
+    case denied
+    case restricted
 
     var title: String {
         switch self {
-        case .file:
-            return "File"
-        case .folder:
-            return "Folder"
-        case .app:
-            return "App"
-        case .report:
-            return "Report"
-        case .table:
-            return "Table"
         case .unknown:
-            return "Artifact"
+            return "Unknown"
+        case .notDetermined:
+            return "Not requested"
+        case .granted:
+            return "Granted"
+        case .denied:
+            return "Blocked"
+        case .restricted:
+            return "Restricted"
         }
     }
 
-    var systemImage: String {
+    var isGranted: Bool {
+        self == .granted
+    }
+
+    var setupDetail: String {
         switch self {
-        case .file:
-            return "doc"
-        case .folder:
-            return "folder"
-        case .app:
-            return "app"
-        case .report:
-            return "doc.text"
-        case .table:
-            return "tablecells"
         case .unknown:
-            return "shippingbox"
+            return "Check AURA microphone access before using voice input."
+        case .notDetermined:
+            return "Grant AURA access to record spoken mission requests."
+        case .granted:
+            return "AURA can record in-app voice requests."
+        case .denied:
+            return "Enable Microphone access for AURA in System Settings."
+        case .restricted:
+            return "Microphone access is restricted by macOS policy."
         }
     }
-}
 
-struct AURAArtifact: Identifiable {
-    let id = UUID()
-    let title: String
-    let path: String
-    let type: AURAArtifactType
-    let owningWorkerID: String?
-    let detectedAt: Date
-
-    var url: URL {
-        URL(fileURLWithPath: path)
-    }
-
-    var exists: Bool {
-        FileManager.default.fileExists(atPath: path)
+    var setupIssue: String? {
+        switch self {
+        case .granted:
+            return nil
+        case .unknown:
+            return "Check Microphone permission for AURA."
+        case .notDetermined:
+            return "Grant Microphone permission to AURA."
+        case .denied:
+            return "Enable Microphone permission for AURA in System Settings."
+        case .restricted:
+            return "Microphone permission for AURA is restricted by macOS."
+        }
     }
 }
 
@@ -248,12 +179,19 @@ struct ContextSnapshot {
     let activeAppName: String
     let bundleIdentifier: String
     let processIdentifier: Int32?
+    let visibleHostAppName: String?
+    let visibleHostBundleIdentifier: String?
+    let visibleHostProcessIdentifier: Int32?
     let cursorX: Double
     let cursorY: Double
     let projectRoot: String
 
     static func capture(projectRoot: URL = AURAPaths.projectRoot) -> ContextSnapshot {
         let frontmostApp = NSWorkspace.shared.frontmostApplication
+        let visibleHostApp = topVisibleHostApplication()
+        let distinctVisibleHostApp = visibleHostApp?.processIdentifier == frontmostApp?.processIdentifier
+            ? nil
+            : visibleHostApp
         let cursor = NSEvent.mouseLocation
 
         return ContextSnapshot(
@@ -261,6 +199,9 @@ struct ContextSnapshot {
             activeAppName: frontmostApp?.localizedName ?? "Unknown",
             bundleIdentifier: frontmostApp?.bundleIdentifier ?? "Unknown",
             processIdentifier: frontmostApp?.processIdentifier,
+            visibleHostAppName: distinctVisibleHostApp?.localizedName,
+            visibleHostBundleIdentifier: distinctVisibleHostApp?.bundleIdentifier,
+            visibleHostProcessIdentifier: distinctVisibleHostApp?.processIdentifier,
             cursorX: cursor.x,
             cursorY: cursor.y,
             projectRoot: projectRoot.path
@@ -280,6 +221,50 @@ struct ContextSnapshot {
             lines.insert("- PID: \(processIdentifier)", at: 3)
         }
 
+        if let visibleHostAppName {
+            lines.append("- Top visible host app: \(visibleHostAppName)")
+            if let visibleHostBundleIdentifier {
+                lines.append("- Top visible host bundle ID: \(visibleHostBundleIdentifier)")
+            }
+            if let visibleHostProcessIdentifier {
+                lines.append("- Top visible host PID: \(visibleHostProcessIdentifier)")
+            }
+        }
+
         return lines.joined(separator: "\n")
+    }
+
+    private static func topVisibleHostApplication() -> NSRunningApplication? {
+        let auraBundleID = Bundle.main.bundleIdentifier ?? "com.wexprolabs.aura"
+        let currentPID = ProcessInfo.processInfo.processIdentifier
+        guard let windowInfo = CGWindowListCopyWindowInfo(
+            [.optionOnScreenOnly, .excludeDesktopElements],
+            kCGNullWindowID
+        ) as? [[String: Any]] else {
+            return nil
+        }
+
+        for window in windowInfo {
+            guard let ownerPID = window[kCGWindowOwnerPID as String] as? pid_t,
+                  ownerPID != currentPID,
+                  let layer = window[kCGWindowLayer as String] as? Int,
+                  layer == 0,
+                  let bounds = window[kCGWindowBounds as String] as? [String: Any],
+                  let width = bounds["Width"] as? Double,
+                  let height = bounds["Height"] as? Double,
+                  width > 80,
+                  height > 80 else {
+                continue
+            }
+
+            let app = NSRunningApplication(processIdentifier: ownerPID)
+            guard app?.bundleIdentifier != auraBundleID else {
+                continue
+            }
+
+            return app
+        }
+
+        return nil
     }
 }

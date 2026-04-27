@@ -5,7 +5,7 @@ AURA is a native macOS ambient assistant shell, not a chatbot. It is the menu ba
 - Global hot key: `⌃⌥⌘A`
 - Native shell: SwiftUI + AppKit on macOS 14+
 - Local runtime: Hermes lives under `.aura/` and is invoked only through `script/aura-hermes`
-- Control lane: Cua Driver is required for host interaction and stays approval-gated
+- Control lane: Cua Driver is required for host interaction; MVP missions run Hermes with `--yolo`
 
 ## MVP Launch Status
 
@@ -77,6 +77,7 @@ Developer ID signed, notarized, stapled, standalone beta build yet.
 ./script/connection_matrix.sh
 ./script/aura-logs stream
 ./script/aura-logs audit
+./script/aura-monitor --open
 ```
 
 ## Local App Bundle Runtime
@@ -88,16 +89,16 @@ pass; Developer ID signing and notarization remain release work.
 
 ## What AURA Does
 
-- shows Hermes health, Cua readiness, approvals, and mission output
+- shows Hermes health, Cua readiness, and mission output
 - launches one Hermes parent mission per task
-- keeps approvals explicit
+- runs Hermes missions approval-free with `--yolo` for MVP validation
 - stores a bounded local audit trail
 
 ## What AURA Does Not Do
 
 - use the global Hermes install
 - own browser automation, a task database, or long-term memory
-- hide host-control risk behind background automation
+- implement a production permission policy yet
 
 ## Repo Map
 

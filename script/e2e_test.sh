@@ -5,7 +5,6 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 HERMES="$ROOT_DIR/script/aura-hermes"
 BUILD_AND_RUN="$ROOT_DIR/script/build_and_run.sh"
 VERIFY_LOGGING="$ROOT_DIR/script/verify_logging.sh"
-SAFE_READ_TOOLSETS="web,skills,todo,memory,session_search,clarify,delegation,cua-driver"
 TMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/aura-e2e.XXXXXX")"
 RUN_APP=1
 
@@ -24,9 +23,7 @@ usage: $0 [--skip-app]
 Runs real end-to-end AURA checks against the project-local Hermes runtime:
   - verifies script/aura-hermes resolves to this repo's .aura Hermes checkout
   - runs real Hermes status
-  - starts a real quiet Hermes mission and parses session_id
-  - asks real Hermes for a NEEDS_APPROVAL gate
-  - resumes that same real Hermes session with --resume
+  - starts a real quiet Hermes mission with --yolo and parses session_id
   - optionally builds and launches the macOS app through script/build_and_run.sh
 USAGE
 }
@@ -128,6 +125,7 @@ if [[ ! -f "$ROOT_DIR/.env.example" ]]; then
 fi
 
 assert_contains "$(<"$ROOT_DIR/config/hermes-default.yaml")" 'command: "${AURA_PROJECT_ROOT}/script/aura-cua-mcp"' "Hermes config template"
+assert_contains "$(<"$ROOT_DIR/config/hermes-default.yaml")" "mode: off" "Hermes config template"
 assert_contains "$(<"$ROOT_DIR/.env.example")" "OPENAI_API_KEY" "environment template"
 
 section "Hermes status"
@@ -185,25 +183,23 @@ assert_contains "$cua_mcp" "script/aura-cua-mcp" "CUA MCP test output"
 
 run_capture "$TMP_DIR/hermes-tools.txt" "$HERMES" tools list --platform cli
 hermes_tools="$(<"$TMP_DIR/hermes-tools.txt")"
-assert_contains "$hermes_tools" "cua-driver  [include only:" "Hermes registered tool surface"
-assert_contains "$hermes_tools" "check_permissions" "Hermes registered tool surface"
-assert_contains "$hermes_tools" "screenshot" "Hermes registered tool surface"
-assert_not_contains "$hermes_tools" "type_text" "Hermes registered tool surface"
-assert_not_contains "$hermes_tools" "click" "Hermes registered tool surface"
+assert_contains "$hermes_tools" "cua-driver  all tools enabled" "Hermes registered tool surface"
+assert_contains "$cua_mcp" "check_permissions" "CUA MCP test output"
+assert_contains "$cua_mcp" "screenshot" "CUA MCP test output"
+assert_contains "$cua_mcp" "type_text" "CUA MCP test output"
+assert_contains "$cua_mcp" "click" "CUA MCP test output"
 assert_contains "$(<"$ROOT_DIR/config/hermes-default.yaml")" "tools:" "Hermes CUA config template"
-assert_contains "$(<"$ROOT_DIR/config/hermes-default.yaml")" "include:" "Hermes CUA config template"
-assert_contains "$(<"$ROOT_DIR/config/hermes-default.yaml")" "check_permissions" "Hermes CUA config template"
-assert_contains "$(<"$ROOT_DIR/config/hermes-default.yaml")" "screenshot" "Hermes CUA config template"
+assert_contains "$(<"$ROOT_DIR/config/hermes-default.yaml")" "prompts: false" "Hermes CUA config template"
+assert_not_contains "$(<"$ROOT_DIR/config/hermes-default.yaml")" "include:" "Hermes CUA config template"
 
 section "Connection matrix"
 run_capture "$TMP_DIR/connection-matrix.txt" "$ROOT_DIR/script/connection_matrix.sh"
 connection_matrix="$(<"$TMP_DIR/connection-matrix.txt")"
 assert_contains "$connection_matrix" "AURA connection matrix checks passed." "connection matrix"
 
-section "Real quiet mission"
+section "Real YOLO quiet mission"
 run_capture "$TMP_DIR/mission.txt" \
-  "$HERMES" chat -Q --source aura-e2e --max-turns 1 \
-    -t "$SAFE_READ_TOOLSETS" \
+  "$HERMES" chat -Q --yolo --source aura-e2e --max-turns 1 \
     -q "Reply exactly: AURA Hermes OK"
 mission_output="$(<"$TMP_DIR/mission.txt")"
 assert_contains "$mission_output" "AURA Hermes OK" "quiet mission output"
@@ -214,30 +210,6 @@ if [[ -z "$mission_session" ]]; then
   exit 1
 fi
 printf "session_id=%s\n" "$mission_session"
-
-section "Real approval gate"
-run_capture "$TMP_DIR/approval.txt" \
-  "$HERMES" chat -Q --source aura-e2e --max-turns 1 \
-    -t "$SAFE_READ_TOOLSETS" \
-    -q $'AURA e2e approval-gate check. Do not use tools. Return exactly these two lines:\nStatus: real Hermes approval gate reached.\nNEEDS_APPROVAL: continue the harmless AURA e2e approval-resume check.'
-approval_output="$(<"$TMP_DIR/approval.txt")"
-assert_contains "$approval_output" "NEEDS_APPROVAL:" "approval mission output"
-approval_session="$(session_id_from "$TMP_DIR/approval.txt")"
-if [[ -z "$approval_session" ]]; then
-  printf "Approval mission did not return session_id.\n" >&2
-  printf "%s\n" "$approval_output" >&2
-  exit 1
-fi
-printf "approval_session_id=%s\n" "$approval_session"
-
-section "Real approval resume"
-run_capture "$TMP_DIR/resume.txt" \
-  "$HERMES" chat -Q --source aura-e2e --max-turns 1 --resume "$approval_session" \
-    -t "$SAFE_READ_TOOLSETS" \
-    -q "Continue the AURA e2e approval-resume check. Do not use tools. Reply exactly: Status: real Hermes approval resume completed."
-resume_output="$(<"$TMP_DIR/resume.txt")"
-assert_contains "$resume_output" "real Hermes approval resume completed" "resume output"
-assert_contains "$resume_output" "session_id: $approval_session" "resume output"
 
 section "Audit ledger"
 /usr/bin/python3 - "$AURA_AUDIT_LEDGER_PATH" <<'PY'
@@ -274,8 +246,6 @@ if cua_timing_errors:
 
 for forbidden in (
     "Reply exactly: AURA Hermes OK",
-    "AURA e2e approval-gate check",
-    "Continue the AURA e2e approval-resume check",
 ):
     if forbidden in raw:
         raise SystemExit(f"audit ledger leaked prompt content: {forbidden!r}")

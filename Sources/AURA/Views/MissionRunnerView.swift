@@ -41,12 +41,6 @@ struct MissionRunnerView: View {
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(.secondary)
 
-            WorkerProjectionView(store: store)
-
-            if let approval = store.pendingApproval {
-                ApprovalRequestCard(store: store, approval: approval)
-            }
-
             HStack {
                 Button {
                     store.openMissionInput()
@@ -73,57 +67,6 @@ struct MissionRunnerView: View {
         }
         .padding(18)
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-    }
-}
-
-private struct ApprovalRequestCard: View {
-    @ObservedObject var store: AURAStore
-    let approval: ApprovalRequest
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Label("Approval Needed", systemImage: "hand.raised")
-                .font(.headline)
-                .foregroundStyle(.orange)
-
-            Text(approval.title)
-                .font(.callout)
-                .textSelection(.enabled)
-                .fixedSize(horizontal: false, vertical: true)
-
-            VStack(alignment: .leading, spacing: 3) {
-                Text("Risk: \(approval.risk)")
-                if let target = approval.target {
-                    Text("Target: \(target)")
-                }
-                Text("Scope: \(approval.scope)")
-            }
-            .font(.caption)
-            .foregroundStyle(.secondary)
-
-            Text("Hermes config controls whether the approved action is available.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-
-            HStack {
-                Button(role: .cancel) {
-                    store.denyPendingApproval()
-                } label: {
-                    Label("Deny", systemImage: "xmark")
-                }
-
-                Spacer()
-
-                Button {
-                    Task { await store.approvePendingAction() }
-                } label: {
-                    Label("Approve & Continue", systemImage: "checkmark")
-                }
-                .disabled(!store.canApproveMission)
-            }
-        }
-        .padding(12)
-        .background(Color.orange.opacity(0.12), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
     }
 }
 
@@ -215,8 +158,6 @@ private struct MissionStatusPill: View {
         switch status {
         case .idle:
             return "circle"
-        case .needsApproval:
-            return "hand.raised"
         case .running:
             return "arrow.triangle.2.circlepath"
         case .completed:
@@ -232,8 +173,6 @@ private struct MissionStatusPill: View {
         switch status {
         case .idle:
             return .secondary
-        case .needsApproval:
-            return .orange
         case .running:
             return .blue
         case .completed:

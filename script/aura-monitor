@@ -1,0 +1,213 @@
+#!/usr/bin/env python3
+from __future__ import annotations
+
+import argparse
+import mimetypes
+import subprocess
+import sys
+import webbrowser
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
+from typing import Iterator
+from urllib.parse import unquote, urlparse
+
+
+ROOT_DIR = Path(__file__).resolve().parents[1]
+STATIC_DIR = ROOT_DIR / "tools" / "aura-monitor"
+DEFAULT_HOST = "127.0.0.1"
+DEFAULT_PORT = 8765
+DEFAULT_PREDICATE = (
+    "subsystem == 'com.wexprolabs.aura' "
+    "|| eventMessage CONTAINS '\"process_kind\":\"wrapper\"' "
+    "|| eventMessage CONTAINS '\"process_kind\":\"cua-mcp-proxy\"'"
+)
+
+
+def sse_event(raw_line: str, event_id: int | None = None) -> str:
+    lines = ["event: log"]
+    if event_id is not None:
+        lines.append(f"id: {event_id}")
+
+    body_lines = raw_line.rstrip("\n").splitlines() or [""]
+    for body_line in body_lines:
+        lines.append(f"data: {body_line}")
+
+    lines.append("")
+    return "\n".join(lines) + "\n"
+
+
+class MonitorServer(ThreadingHTTPServer):
+    daemon_threads = True
+
+    def __init__(
+        self,
+        server_address: tuple[str, int],
+        handler_class: type[BaseHTTPRequestHandler],
+        predicate: str,
+        fixture: Path | None,
+    ) -> None:
+        super().__init__(server_address, handler_class)
+        self.predicate = predicate
+        self.fixture = fixture
+
+
+class MonitorHandler(BaseHTTPRequestHandler):
+    server_version = "AURAMonitor/1.0"
+
+    @property
+    def monitor_server(self) -> MonitorServer:
+        return self.server  # type: ignore[return-value]
+
+    def do_GET(self) -> None:
+        path = urlparse(self.path).path
+        if path == "/events":
+            self.handle_events()
+            return
+
+        if path == "/health":
+            self.send_bytes(b"ok\n", "text/plain; charset=utf-8")
+            return
+
+        if path == "/":
+            self.serve_static("index.html")
+            return
+
+        self.serve_static(unquote(path.lstrip("/")))
+
+    def handle_events(self) -> None:
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+        self.send_header("Cache-Control", "no-cache")
+        self.end_headers()
+
+        try:
+            for event_id, line in enumerate(self.iter_log_lines(), start=1):
+                if not line.strip():
+                    continue
+                self.wfile.write(sse_event(line, event_id=event_id).encode("utf-8"))
+                self.wfile.flush()
+        except (BrokenPipeError, ConnectionResetError):
+            return
+        finally:
+            self.close_connection = True
+
+    def iter_log_lines(self) -> Iterator[str]:
+        fixture = self.monitor_server.fixture
+        if fixture is not None:
+            with fixture.open("r", encoding="utf-8") as handle:
+                for line in handle:
+                    yield line.rstrip("\n")
+            return
+
+        process = subprocess.Popen(
+            [
+                "/usr/bin/log",
+                "stream",
+                "--info",
+                "--predicate",
+                self.monitor_server.predicate,
+                "--style",
+                "json",
+            ],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            text=True,
+            bufsize=1,
+        )
+
+        try:
+            if process.stdout is None:
+                return
+
+            for line in process.stdout:
+                yield line.rstrip("\n")
+        finally:
+            if process.poll() is None:
+                process.terminate()
+                try:
+                    process.wait(timeout=2)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+                    process.wait(timeout=2)
+
+    def serve_static(self, relative_path: str) -> None:
+        root = STATIC_DIR.resolve()
+        target = (root / relative_path).resolve()
+
+        try:
+            target.relative_to(root)
+        except ValueError:
+            self.send_error(404)
+            return
+
+        if not target.is_file():
+            self.send_error(404)
+            return
+
+        content_type = mimetypes.guess_type(target.name)[0] or "application/octet-stream"
+        self.send_bytes(target.read_bytes(), content_type)
+
+    def send_bytes(self, body: bytes, content_type: str) -> None:
+        self.send_response(200)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def log_message(self, format: str, *args: object) -> None:
+        sys.stderr.write("%s - %s\n" % (self.address_string(), format % args))
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        prog="aura-monitor",
+        description="Serve a local browser visualizer for raw AURA log stream events.",
+    )
+    parser.add_argument("--port", type=int, default=DEFAULT_PORT)
+    parser.add_argument("--open", action="store_true", help="Open the monitor in the default browser.")
+    parser.add_argument(
+        "--predicate",
+        default=DEFAULT_PREDICATE,
+        help="Override the macOS log predicate used for the stream.",
+    )
+    parser.add_argument(
+        "--fixture",
+        type=Path,
+        help=argparse.SUPPRESS,
+    )
+    return parser.parse_args()
+
+
+def main() -> int:
+    args = parse_args()
+    fixture = args.fixture.resolve() if args.fixture else None
+    if fixture is not None and not fixture.is_file():
+        print(f"Missing fixture: {fixture}", file=sys.stderr)
+        return 2
+
+    server = MonitorServer(
+        (DEFAULT_HOST, args.port),
+        MonitorHandler,
+        predicate=args.predicate,
+        fixture=fixture,
+    )
+    host, port = server.server_address
+    url = f"http://{host}:{port}"
+
+    print(f"AURA monitor running at {url}")
+    print("Press Ctrl-C to stop.")
+    if args.open:
+        webbrowser.open(url)
+
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        print()
+    finally:
+        server.server_close()
+
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

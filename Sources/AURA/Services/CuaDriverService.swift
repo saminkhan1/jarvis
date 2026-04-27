@@ -3,13 +3,8 @@ import Darwin
 import Foundation
 
 final class CuaDriverService {
-    private let hermesService: HermesService
     private let appBundle = "/Applications/CuaDriver.app"
     private let appBinary = "/Applications/CuaDriver.app/Contents/MacOS/cua-driver"
-
-    init(hermesService: HermesService) {
-        self.hermesService = hermesService
-    }
 
     func status(
         traceID: String = AURATelemetry.makeTraceID(prefix: "cua-status"),
@@ -20,18 +15,19 @@ final class CuaDriverService {
             AURATelemetry.info(.cuaStatusStart, category: .cua, traceID: traceID)
         }
 
-        async let mcpResult = hermesService.run(arguments: ["mcp", "list"], traceID: traceID, telemetryEnabled: telemetryEnabled)
         let preferredExecutablePath = preferredExecutablePath()
 
         var version: String?
         var daemonStatus = "Not installed"
         var accessibilityGranted: Bool?
         var screenRecordingGranted: Bool?
+        var isMCPRegistered = false
 
         if let preferredExecutablePath {
             let command = shellQuoted(preferredExecutablePath)
             async let versionResult = runShell("\(command) --version", traceID: traceID, telemetryEnabled: telemetryEnabled)
             async let daemonResult = runShell("\(command) status", traceID: traceID, telemetryEnabled: telemetryEnabled)
+            async let mcpResult = testProjectHermesCuaMCP(traceID: traceID, telemetryEnabled: telemetryEnabled)
 
             let resolvedVersion = await versionResult
             let resolvedDaemon = await daemonResult
@@ -44,9 +40,8 @@ final class CuaDriverService {
                 accessibilityGranted = Self.permissionValue(named: "accessibility", in: resolvedPermissions.combinedOutput)
                 screenRecordingGranted = Self.permissionValue(named: "screen recording", in: resolvedPermissions.combinedOutput)
             }
+            isMCPRegistered = await mcpResult
         }
-
-        let mcpOutput = (try? await mcpResult)?.combinedOutput ?? ""
 
         let status = CuaDriverStatus(
             executablePath: preferredExecutablePath,
@@ -54,8 +49,7 @@ final class CuaDriverService {
             daemonStatus: daemonStatus,
             accessibilityGranted: accessibilityGranted,
             screenRecordingGranted: screenRecordingGranted,
-            isMCPRegistered: Self.mcpListShowsEnabledCuaDriver(mcpOutput)
-                && Self.projectHermesUsesAURACuaProxy(),
+            isMCPRegistered: isMCPRegistered,
             lastCheckedAt: Date()
         )
 
@@ -554,26 +548,24 @@ final class CuaDriverService {
         "'\(value.replacingOccurrences(of: "'", with: "'\\''"))'"
     }
 
-    private static func mcpListShowsEnabledCuaDriver(_ output: String) -> Bool {
-        output
-            .split(separator: "\n")
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
-            .contains { line in
-                guard line.hasPrefix("cua-driver") else { return false }
-                return line.contains("enabled") || line.contains("✓")
-            }
-    }
-
-    private static func projectHermesUsesAURACuaProxy() -> Bool {
-        let configPath = AURAPaths.projectRoot
-            .appendingPathComponent(".aura/hermes-home/config.yaml")
+    private func testProjectHermesCuaMCP(traceID: String, telemetryEnabled: Bool) async -> Bool {
+        let wrapperPath = AURAPaths.projectRoot
+            .appendingPathComponent("script/aura-hermes")
             .path
-        guard let config = try? String(contentsOfFile: configPath, encoding: .utf8) else {
+        guard FileManager.default.isExecutableFile(atPath: wrapperPath) else {
             return false
         }
 
-        return config.contains("cua-driver:")
-            && config.contains("script/aura-cua-mcp")
+        let result = await runShell(
+            "\(shellQuoted(wrapperPath)) mcp test cua-driver",
+            timeout: 20,
+            traceID: traceID,
+            telemetryEnabled: telemetryEnabled
+        )
+        let output = result.combinedOutput.lowercased()
+        return result.succeeded
+            && output.contains("connected")
+            && output.contains("tools discovered")
     }
 
     private static func permissionValue(named name: String, in output: String) -> Bool? {

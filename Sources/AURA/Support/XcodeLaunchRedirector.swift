@@ -112,6 +112,8 @@ enum XcodeLaunchRedirector {
           <string>14.0</string>
           <key>NSPrincipalClass</key>
           <string>NSApplication</string>
+          <key>NSMicrophoneUsageDescription</key>
+          <string>AURA records your spoken mission request when you use in-app voice input.</string>
         </dict>
         </plist>
         """

@@ -42,7 +42,7 @@ private struct OnboardingGateView: View {
                 VStack(alignment: .leading, spacing: 6) {
                     Text("AURA Setup Required")
                         .font(.title.bold())
-                    Text("AURA is locked until Cua Driver host control is installed, permissioned, running, and registered with project Hermes.")
+                    Text("AURA is locked until host control and the selected mission input are ready.")
                         .font(.callout)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -50,7 +50,7 @@ private struct OnboardingGateView: View {
 
                 Spacer()
 
-                if store.isCheckingCua || store.isRunningCuaOnboarding {
+                if store.isCheckingCua || store.isRunningCuaOnboarding || store.isRequestingMicrophonePermission {
                     ProgressView()
                         .controlSize(.small)
                 }
@@ -71,10 +71,13 @@ private struct OnboardingGateView: View {
             .background(Color.primary.opacity(0.045), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
 
             VStack(alignment: .leading, spacing: 8) {
-                Text("Hermes Config Type")
+                Text("Hermes Config")
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.secondary)
-                HermesConfigTypePicker(store: store)
+                Text(store.hermesToolSurfaceSummary)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
             .padding(12)
             .background(Color.primary.opacity(0.045), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
@@ -86,7 +89,7 @@ private struct OnboardingGateView: View {
                         ? store.cuaStatus.executablePath ?? "Installed"
                         : "Install Cua Driver before AURA can start.",
                     isComplete: store.cuaStatus.isInstalled,
-                    actionTitle: store.cuaStatus.isInstalled ? nil : "Copy Install"
+                    actionTitle: store.cuaStatus.isInstalled ? nil : "Copy Setup"
                 ) {
                     store.copyCuaInstallCommand()
                 }
@@ -118,6 +121,17 @@ private struct OnboardingGateView: View {
                     Task { await store.requestCuaDriverPermissions(focusing: .screenRecording) }
                 }
 
+                if store.inputMode == .voice {
+                    CuaSetupRow(
+                        title: "Microphone",
+                        detail: store.microphonePermissionStatus.setupDetail,
+                        isComplete: store.microphonePermissionStatus.isGranted,
+                        actionTitle: store.microphonePermissionActionTitle
+                    ) {
+                        Task { await store.handleMicrophonePermissionAction() }
+                    }
+                }
+
                 CuaSetupRow(
                     title: "Hermes MCP",
                     detail: "Register AURA's CUA daemon proxy with project-local Hermes.",
@@ -139,7 +153,7 @@ private struct OnboardingGateView: View {
                 Button {
                     store.copyCuaInstallCommand()
                 } label: {
-                    Label("Copy Install", systemImage: "doc.on.doc")
+                    Label("Copy Setup", systemImage: "doc.on.doc")
                 }
 
                 Button {
@@ -214,7 +228,7 @@ private struct DashboardHeader: View {
             VStack(alignment: .leading, spacing: 4) {
                 Text("AURA")
                     .font(.title.bold())
-                Text("Native cockpit for Hermes missions, approvals, and host-lane readiness.")
+                Text("Native cockpit for Hermes missions, YOLO runs, and host-lane readiness.")
                     .font(.callout)
                     .foregroundStyle(.secondary)
             }
@@ -251,7 +265,6 @@ private struct StatusGrid: View {
             StatusTile(title: "Hermes", value: store.healthState.title, systemImage: "bolt.horizontal.circle", color: healthColor)
             StatusTile(title: "Mission", value: store.missionStatus.title, systemImage: "point.3.connected.trianglepath.dotted", color: missionColor)
             StatusTile(title: "Input", value: store.inputMode.title, systemImage: store.inputMode.systemImage, color: .secondary)
-            StatusTile(title: "Workers", value: "\(store.workerRuns.count)", systemImage: "square.stack.3d.up", color: workerColor)
             StatusTile(title: "Tools", value: store.hermesToolSurfaceTitle, systemImage: store.hermesToolSurfaceSystemImage, color: .secondary)
             StatusTile(title: "CUA", value: store.cuaStatus.title, systemImage: "display.and.arrow.down", color: store.cuaStatus.readyForHostControl ? .green : .orange)
         }
@@ -276,8 +289,6 @@ private struct StatusGrid: View {
         switch store.missionStatus {
         case .idle, .cancelled:
             return .secondary
-        case .needsApproval:
-            return .orange
         case .running:
             return .blue
         case .completed:
@@ -287,9 +298,6 @@ private struct StatusGrid: View {
         }
     }
 
-    private var workerColor: Color {
-        store.workerRuns.contains(where: { $0.status == .needsApproval }) ? .orange : .secondary
-    }
 }
 
 private struct StatusTile: View {
@@ -333,7 +341,7 @@ private struct MissionConfigurationCard: View {
 
                 Spacer()
 
-                if store.isApplyingHermesConfig {
+                if store.isRefreshingHermesConfig {
                     ProgressView()
                         .controlSize(.small)
                 }
@@ -343,7 +351,7 @@ private struct MissionConfigurationCard: View {
                 } label: {
                     Label("Refresh", systemImage: "arrow.clockwise")
                 }
-                .disabled(store.isApplyingHermesConfig)
+                .disabled(store.isRefreshingHermesConfig)
             }
 
             HStack(alignment: .top, spacing: 18) {
@@ -358,21 +366,19 @@ private struct MissionConfigurationCard: View {
                 Divider()
 
                 VStack(alignment: .leading, spacing: 8) {
-                    Text("Config Type")
+                    Text("Config")
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(.secondary)
-                    HermesConfigTypePicker(store: store)
+
+                    Text(store.hermesToolSurfaceSummary)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
                 .frame(maxWidth: .infinity, alignment: .topLeading)
             }
 
-            HStack(spacing: 12) {
-                ConfigMetric(title: "Approvals", value: store.hermesConfigSummary.approvalMode)
-                ConfigMetric(title: "CUA", value: store.hermesConfigSummary.cuaSurfaceTitle)
-                ConfigMetric(title: "Toolsets", value: "\(store.hermesConfigSummary.cliToolsets.count)")
-
-                Spacer()
-
+            HStack {
                 Button {
                     store.openHermesConfigFile()
                 } label: {
@@ -386,26 +392,23 @@ private struct MissionConfigurationCard: View {
                 }
             }
             .font(.caption)
+
+            ScrollView(.vertical) {
+                Text(store.hermesConfigOutput)
+                    .font(.system(.caption, design: .monospaced))
+                    .textSelection(.enabled)
+                    .padding(12)
+                    .frame(maxWidth: .infinity, alignment: .topLeading)
+            }
+            .frame(minHeight: 90, maxHeight: 220, alignment: .topLeading)
+            .background(Color.black.opacity(0.08), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .strokeBorder(Color.primary.opacity(0.08), lineWidth: 1)
+            )
         }
         .padding(18)
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-    }
-}
-
-private struct ConfigMetric: View {
-    let title: String
-    let value: String
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(title.uppercased())
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-            Text(value)
-                .font(.caption.weight(.semibold))
-                .lineLimit(1)
-        }
-        .frame(minWidth: 76, alignment: .leading)
     }
 }
 
@@ -432,72 +435,22 @@ private struct HermesSessionsCard: View {
                 .disabled(store.isRunning)
             }
 
-            if store.hermesSessions.isEmpty {
+            ScrollView(.horizontal) {
                 Text(store.hermesSessionsOutput)
                     .font(.system(.caption, design: .monospaced))
                     .textSelection(.enabled)
                     .padding(12)
                     .frame(maxWidth: .infinity, alignment: .topLeading)
-                    .background(Color.black.opacity(0.08), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-            } else {
-                VStack(spacing: 0) {
-                    ForEach(Array(store.hermesSessions.enumerated()), id: \.element.id) { index, session in
-                        HermesSessionRow(session: session)
-
-                        if index < store.hermesSessions.count - 1 {
-                            Divider()
-                        }
-                    }
-                }
-                .textSelection(.enabled)
             }
+            .background(Color.black.opacity(0.08), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .strokeBorder(Color.primary.opacity(0.08), lineWidth: 1)
+            )
+            .frame(maxWidth: .infinity, alignment: .topLeading)
         }
         .padding(18)
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-    }
-}
-
-private struct HermesSessionRow: View {
-    let session: HermesSessionSummary
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(alignment: .firstTextBaseline, spacing: 10) {
-                Text(session.preview)
-                    .font(.callout.weight(.medium))
-                    .lineLimit(1)
-
-                Spacer()
-
-                Text(session.statusTitle)
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.secondary)
-            }
-
-            HStack(spacing: 10) {
-                Text(session.id)
-                    .font(.system(.caption, design: .monospaced))
-                    .lineLimit(1)
-
-                Text(session.source)
-                Text(session.model)
-                Text("\(session.messageCount) messages")
-
-                if session.toolCallCount > 0 {
-                    Text("\(session.toolCallCount) tools")
-                }
-
-                Spacer()
-
-                if let date = session.displayDate {
-                    Text(date, style: .relative)
-                }
-            }
-            .font(.caption)
-            .foregroundStyle(.secondary)
-            .lineLimit(1)
-        }
-        .padding(.vertical, 9)
     }
 }
 

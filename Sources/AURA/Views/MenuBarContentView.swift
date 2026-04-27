@@ -10,12 +10,12 @@ struct MenuBarContentView: View {
             Text("AURA")
                 .font(.headline)
 
-            if !store.cuaStatus.readyForHostControl {
+            if !store.isFunctionalSurfaceReady {
                 Text("Setup required")
                     .font(.caption)
                     .foregroundStyle(.orange)
 
-                Text(store.cuaStatus.title)
+                Text(store.setupStatusTitle)
                     .font(.caption)
                     .foregroundStyle(.secondary)
 
@@ -31,7 +31,7 @@ struct MenuBarContentView: View {
                 }
                 .disabled(store.isCheckingCua)
 
-                Button("Copy CUA Install") {
+                Button("Copy Setup") {
                     store.copyCuaInstallCommand()
                 }
 
@@ -85,17 +85,6 @@ struct MenuBarContentView: View {
                     store.cancelMission()
                 }
                 .disabled(!store.canCancelMission)
-
-                if store.pendingApproval != nil {
-                    Button("Approve & Continue") {
-                        Task { await store.approvePendingAction() }
-                    }
-                    .disabled(!store.canApproveMission)
-
-                    Button("Deny Approval") {
-                        store.denyPendingApproval()
-                    }
-                }
 
                 Button("Run Doctor") {
                     Task { await store.runDoctor() }

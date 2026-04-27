@@ -16,10 +16,7 @@ struct SettingsView: View {
             }
 
             Section("Hermes Tooling") {
-                HermesConfigTypePicker(store: store)
                 LabeledContent("Tool Surface", value: store.hermesToolSurfaceTitle)
-                LabeledContent("Approvals", value: store.hermesConfigSummary.approvalMode)
-                LabeledContent("CUA Tools", value: store.hermesConfigSummary.cuaSurfaceTitle)
                 LabeledContent("Config", value: AURAPaths.hermesHome.appendingPathComponent("config.yaml").path)
 
                 HStack {
@@ -39,10 +36,18 @@ struct SettingsView: View {
                 Text(store.hermesToolSurfaceSummary)
                     .font(.caption)
                     .foregroundStyle(.secondary)
+
+                Text(store.hermesConfigOutput)
+                    .font(.system(.caption, design: .monospaced))
+                    .textSelection(.enabled)
             }
 
             Section("Mission Input") {
                 MissionInputModePicker(store: store)
+                LabeledContent("Microphone", value: store.microphonePermissionStatus.title)
+                Text(store.microphonePermissionStatus.setupDetail)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
 
             Section("CUA Driver") {

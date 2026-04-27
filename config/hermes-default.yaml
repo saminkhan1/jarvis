@@ -7,7 +7,7 @@
 model:
   # Validate the configured provider/model with:
   #   ./script/aura-hermes doctor
-  #   ./script/aura-hermes chat -Q --source aura-setup -q "Reply exactly: AURA OK"
+  #   ./script/aura-hermes chat -Q --yolo --source aura-setup -q "Reply exactly: AURA OK"
   default: gpt-5.4
   provider: openai-codex
   base_url: https://openrouter.ai/api/v1
@@ -27,9 +27,9 @@ agent:
   verbose: false
 
 approvals:
-  # AURA changes this through project-local Hermes CLI config commands, never
-  # by passing per-mission policy flags.
-  mode: manual
+  # MVP validation runs approval-free. AURA also passes --yolo on Hermes chat
+  # missions so dangerous-command prompts do not pause the product loop.
+  mode: off
   timeout: 60
   cron_mode: deny
 
@@ -88,19 +88,6 @@ mcp_servers:
   cua-driver:
     command: "${AURA_PROJECT_ROOT}/script/aura-cua-mcp"
     tools:
-      include:
-        - check_permissions
-        - get_accessibility_tree
-        - get_agent_cursor_state
-        - get_config
-        - get_cursor_position
-        - get_recording_state
-        - get_screen_size
-        - get_window_state
-        - list_apps
-        - list_windows
-        - screenshot
-        - zoom
       prompts: false
       resources: false
     enabled: true

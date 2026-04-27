@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>AURA Log Monitor</title>
+    <link rel="stylesheet" href="/style.css">
+  </head>
+  <body>
+    <header class="topbar">
+      <div>
+        <h1>AURA Log Monitor</h1>
+        <p id="connectionStatus" class="status">Connecting</p>
+      </div>
+      <div class="summary" aria-label="log summary">
+        <span><strong id="totalCount">0</strong> total</span>
+        <span><strong id="visibleCount">0</strong> visible</span>
+        <span><strong id="lastEventTime">-</strong> last</span>
+      </div>
+    </header>
+
+    <main class="shell">
+      <section class="stream">
+        <div class="toolbar">
+          <label>
+            Severity
+            <select id="severityFilter">
+              <option value="">All</option>
+              <option value="debug">Debug</option>
+              <option value="info">Info</option>
+              <option value="warning">Warning</option>
+              <option value="error">Error</option>
+            </select>
+          </label>
+
+          <label>
+            Category
+            <select id="categoryFilter">
+              <option value="">All</option>
+            </select>
+          </label>
+
+          <label>
+            Event
+            <select id="eventFilter">
+              <option value="">All</option>
+            </select>
+          </label>
+
+          <label class="search">
+            Search
+            <input id="searchInput" type="search" autocomplete="off" spellcheck="false">
+          </label>
+
+          <button id="pauseButton" type="button">Pause</button>
+          <button id="clearButton" type="button">Clear</button>
+        </div>
+
+        <div class="tableWrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Time</th>
+                <th>Severity</th>
+                <th>Category</th>
+                <th>Event</th>
+                <th>Trace</th>
+                <th>Mission</th>
+                <th>Operation</th>
+                <th>Tool</th>
+                <th>Process</th>
+                <th>Duration</th>
+              </tr>
+            </thead>
+            <tbody id="logRows"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <aside class="details" aria-label="selected log details">
+        <h2>Selected Event</h2>
+        <div id="emptyDetails" class="empty">Select a row.</div>
+        <div id="selectedDetails" class="hidden">
+          <dl>
+            <div>
+              <dt>Event</dt>
+              <dd id="detailEvent">-</dd>
+            </div>
+            <div>
+              <dt>Trace</dt>
+              <dd id="detailTrace">-</dd>
+            </div>
+            <div>
+              <dt>Mission</dt>
+              <dd id="detailMission">-</dd>
+            </div>
+          </dl>
+          <h3>Raw Line</h3>
+          <pre id="rawLine"></pre>
+          <h3>Event Message</h3>
+          <pre id="eventMessage"></pre>
+        </div>
+      </aside>
+    </main>
+
+    <script src="/app.js"></script>
+  </body>
+</html>

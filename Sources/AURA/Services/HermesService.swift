@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 
 enum HermesServiceError: LocalizedError {
@@ -47,7 +48,9 @@ final class HermesService {
             throw HermesServiceError.missingWrapper(wrapperURL.path)
         }
 
-        return try await withCheckedThrowingContinuation { continuation in
+        let cancellation = CancellableProcessBox()
+        return try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { continuation in
             let process = Process()
             let standardOutput = Pipe()
             let standardError = Pipe()
@@ -61,6 +64,12 @@ final class HermesService {
             process.standardOutput = standardOutput
             process.standardError = standardError
             process.environment = Self.mergedEnvironment(environment, traceID: traceID)
+            cancellation.setProcess(process)
+
+            guard !cancellation.isCancelled else {
+                continuation.resume(throwing: CancellationError())
+                return
+            }
 
             if telemetryEnabled {
                 AURATelemetry.info(
@@ -114,6 +123,11 @@ final class HermesService {
                     traceID: traceID
                 )
 
+                if cancellation.isCancelled {
+                    continuation.resume(throwing: CancellationError())
+                    return
+                }
+
                 if result.succeeded, telemetryEnabled {
                     AURATelemetry.info(
                         .hermesCommandFinish,
@@ -151,6 +165,9 @@ final class HermesService {
 
             do {
                 try process.run()
+                if cancellation.isCancelled {
+                    cancellation.cancel()
+                }
             } catch {
                 if telemetryEnabled {
                     AURATelemetry.error(
@@ -166,6 +183,9 @@ final class HermesService {
                 }
                 continuation.resume(throwing: error)
             }
+            }
+        } onCancel: {
+            cancellation.cancel()
         }
     }
 
@@ -324,6 +344,7 @@ final class HermesService {
                 "AURA_APP_SESSION_ID": AURATelemetry.appSessionID,
                 "AURA_PARENT_PID": "\(AURATelemetry.processID)",
                 "AURA_PROCESS_KIND": "hermes",
+                "AURA_SKIP_WRAPPER_EXEC_TELEMETRY": "1",
                 "AURA_TRACE_ID": traceID,
                 "AURA_AUDIT_LEDGER_PATH": AURAAuditLedger.shared.ledgerURL.path
             ]) { _, new in new }
@@ -344,5 +365,49 @@ private final class LockedData {
         lock.lock()
         storage.append(data)
         lock.unlock()
+    }
+}
+
+private final class CancellableProcessBox: @unchecked Sendable {
+    private let lock = NSLock()
+    private var process: Process?
+    private var cancelled = false
+
+    var isCancelled: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return cancelled
+    }
+
+    func setProcess(_ process: Process) {
+        lock.lock()
+        self.process = process
+        let shouldTerminate = cancelled
+        lock.unlock()
+
+        if shouldTerminate {
+            terminate(process)
+        }
+    }
+
+    func cancel() {
+        lock.lock()
+        cancelled = true
+        let process = self.process
+        lock.unlock()
+
+        if let process {
+            terminate(process)
+        }
+    }
+
+    private func terminate(_ process: Process) {
+        guard process.isRunning else { return }
+        process.terminate()
+        DispatchQueue.global().asyncAfter(deadline: .now() + 1) {
+            if process.isRunning {
+                kill(process.processIdentifier, SIGKILL)
+            }
+        }
     }
 }

@@ -289,10 +289,10 @@ migrate_cua_mcp_config() {
       return
     fi
 
-    if grep -q "script/aura-cua-mcp" "$config_target" && grep -q "include:" "$config_target"; then
-      ok "CUA MCP tool exposure is configured in Hermes"
+    if grep -q "script/aura-cua-mcp" "$config_target"; then
+      ok "CUA MCP is configured in Hermes"
     else
-      warn "CUA MCP tool exposure should be configured with mcp_servers.cua-driver.tools.include"
+      warn "CUA MCP should be configured with mcp_servers.cua-driver.command"
     fi
     return
   fi
@@ -366,8 +366,13 @@ if not isinstance(tools, dict):
     server["tools"] = tools
     changed = True
 
-if not tools.get("include"):
-    tools["include"] = read_tools
+include = tools.get("include")
+if isinstance(include, list) and set(include) == set(read_tools):
+    tools.pop("include", None)
+    changed = True
+
+if tools.get("exclude") == []:
+    tools.pop("exclude", None)
     changed = True
 
 for key in ("prompts", "resources"):

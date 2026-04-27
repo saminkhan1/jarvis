@@ -67,6 +67,8 @@ cat >"$INFO_PLIST" <<PLIST
   <string>$MIN_SYSTEM_VERSION</string>
   <key>NSPrincipalClass</key>
   <string>NSApplication</string>
+  <key>NSMicrophoneUsageDescription</key>
+  <string>AURA records your spoken mission request when you use in-app voice input.</string>
 </dict>
 </plist>
 PLIST

@@ -6,8 +6,8 @@ This note maps `AURA_MVP_FINAL_EXECUTION_REPORT.md` to the current `main` branch
 
 - `script/aura-hermes` already enforces the project-local Hermes boundary under `.aura/` and scopes `HOME` plus `HERMES_HOME` into the repo runtime.
 - `script/aura-cua-mcp` already keeps CUA behind the daemon-backed MCP proxy and filters read-only versus action tools by AURA policy.
-- `AURAStore` already launches one Hermes parent mission, passes a mission envelope, parses `NEEDS_APPROVAL:`, resumes with `--resume`, and supports cancellation.
-- `script/e2e_test.sh` already verifies Hermes wrapper isolation, CUA readiness, MCP registration, real approval/resume flow, audit correlation, and app launch.
+- `AURAStore` already launches one Hermes parent mission with `--yolo`, passes a mission envelope, captures the `session_id`, and supports cancellation.
+- `script/e2e_test.sh` already verifies Hermes wrapper isolation, CUA readiness, MCP registration, real YOLO mission flow, audit correlation, and app launch.
 - The repo correctly treats voice, standalone runtime install, signing/notarization, and polished beta onboarding as future work rather than current baseline.
 
 ## Apply First
@@ -31,10 +31,10 @@ This note maps `AURA_MVP_FINAL_EXECUTION_REPORT.md` to the current `main` branch
    - Document the fresh-clone sequence: setup, provider config, CUA readiness, e2e, build/run.
    - Keep the current short run command, but do not present it as enough for a new developer.
 
-5. Add read-only observe/advice regression coverage.
+5. Add product-loop regression coverage.
    - Extend `script/e2e_test.sh` or add a smoke script with screen-context prompts.
-   - Assert Read Only mode exposes read/snapshot CUA tools only.
-   - Assert observe/advice missions do not request approval unless an action is proposed.
+   - Assert normal missions run through Hermes with `--yolo`.
+   - Defer permission policy coverage until the product loop is validated.
 
 6. Keep standalone runtime work scoped as the next beta blocker.
    - `AURAPaths` is still repo/dist-oriented.
@@ -52,8 +52,8 @@ This note maps `AURA_MVP_FINAL_EXECUTION_REPORT.md` to the current `main` branch
 ```text
 setup.sh + config templates + provider smoke test
   -> README fresh-clone quickstart
-  -> read-only observe/advice regression tests
-  -> action approval regression tests
+  -> YOLO mission regression tests
+  -> permission policy regression tests
   -> Application Support runtime resolution
   -> standalone bootstrap and packaging
 ```

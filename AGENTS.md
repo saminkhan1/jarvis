@@ -14,8 +14,8 @@ AURA is a Mac-native ambient assistant shell, not a chatbot.
 - Stay lean. Prefer existing Hermes, MCP, CUA, Browser Use, and platform SDKs over custom infrastructure.
 - Do not use the global Hermes install.
 - Do not commit `.aura/`, API keys, logs, generated artifacts, or local caches.
-- Do not use Hermes `--yolo` from AURA.
-- Keep sends, posts, purchases, credential-sensitive work, financial actions, and unrelated foreground takeover approval-gated. In Always Allow mode, destructive local file operations are allowed without a separate prompt.
+- AURA MVP missions run Hermes with `--yolo`; product permission policy is deferred.
+- Do not build custom approval infrastructure in AURA until the product loop is validated.
 - Avoid copying protected creator content; transform/adapt creative patterns into original work.
 
 ## Local Commands
