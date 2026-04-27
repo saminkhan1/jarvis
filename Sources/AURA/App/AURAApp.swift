@@ -16,8 +16,8 @@ struct AURAApp: App {
         }
         .commands {
             CommandGroup(after: .appInfo) {
-                Button("New Mission") {
-                    store.showAmbientEntryPoint()
+                Button(store.inputMode.actionTitle) {
+                    store.openMissionInput()
                 }
                 .keyboardShortcut("a", modifiers: [.control, .option, .command])
                 .disabled(!store.canOpenAmbientEntryPoint)

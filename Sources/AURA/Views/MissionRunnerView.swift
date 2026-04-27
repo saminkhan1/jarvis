@@ -49,9 +49,9 @@ struct MissionRunnerView: View {
 
             HStack {
                 Button {
-                    store.showAmbientEntryPoint()
+                    store.openMissionInput()
                 } label: {
-                    Label("Open Composer", systemImage: "sparkle.magnifyingglass")
+                    Label(store.inputMode.actionTitle, systemImage: store.inputMode.systemImage)
                 }
                 .keyboardShortcut("a", modifiers: [.control, .option, .command])
                 .disabled(!store.canOpenAmbientEntryPoint)

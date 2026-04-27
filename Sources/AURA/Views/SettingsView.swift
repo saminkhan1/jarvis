@@ -24,14 +24,8 @@ struct SettingsView: View {
                     .foregroundStyle(.secondary)
             }
 
-            Section("Hermes Voice Mode") {
-                Button("Open Hermes Voice Mode") {
-                    store.openHermesVoiceMode()
-                }
-
-                Text(store.hermesVoiceModeSummary)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+            Section("Mission Input") {
+                MissionInputModePicker(store: store)
             }
 
             Section("CUA Driver") {

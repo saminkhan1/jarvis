@@ -59,6 +59,15 @@ private struct OnboardingGateView: View {
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
 
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Mission Input")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                MissionInputModePicker(store: store)
+            }
+            .padding(12)
+            .background(Color.primary.opacity(0.045), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+
             VStack(spacing: 6) {
                 CuaSetupRow(
                     title: "Cua Driver",
@@ -202,9 +211,9 @@ private struct DashboardHeader: View {
             Spacer()
 
             Button {
-                store.showAmbientEntryPoint()
+                store.openMissionInput()
             } label: {
-                Label("New Mission", systemImage: "plus")
+                Label(store.inputMode.actionTitle, systemImage: store.inputMode.systemImage)
             }
             .keyboardShortcut("a", modifiers: [.control, .option, .command])
             .disabled(!store.canOpenAmbientEntryPoint)
@@ -230,6 +239,7 @@ private struct StatusGrid: View {
         LazyVGrid(columns: [GridItem(.adaptive(minimum: 180), spacing: 12)], spacing: 12) {
             StatusTile(title: "Hermes", value: store.healthState.title, systemImage: "bolt.horizontal.circle", color: healthColor)
             StatusTile(title: "Mission", value: store.missionStatus.title, systemImage: "point.3.connected.trianglepath.dotted", color: missionColor)
+            StatusTile(title: "Input", value: store.inputMode.title, systemImage: store.inputMode.systemImage, color: .secondary)
             StatusTile(title: "Workers", value: "\(store.workerRuns.count)", systemImage: "square.stack.3d.up", color: workerColor)
             StatusTile(title: "Tools", value: store.hermesToolSurfaceTitle, systemImage: store.hermesToolSurfaceSystemImage, color: .secondary)
             StatusTile(title: "CUA", value: store.cuaStatus.title, systemImage: "display.and.arrow.down", color: store.cuaStatus.readyForHostControl ? .green : .orange)
@@ -451,10 +461,6 @@ private struct HermesControlCard: View {
                     Task { await store.runDoctor() }
                 }
 
-                Button("Open Voice Mode") {
-                    store.openHermesVoiceMode()
-                }
-
                 Button("Copy Setup") {
                     store.copySetupCommand()
                 }
@@ -465,7 +471,7 @@ private struct HermesControlCard: View {
             }
             .disabled(store.isRunning)
 
-            Text(store.hermesVoiceModeSummary)
+            Text("Mission input mode is configured in Settings and during onboarding.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)

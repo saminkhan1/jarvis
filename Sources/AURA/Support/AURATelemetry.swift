@@ -134,6 +134,7 @@ enum AURATelemetry {
         case missionFinishFailed = "mission_finish_failed"
         case missionLaunchFailed = "mission_launch_failed"
         case missionLaunchHermes = "mission_launch_hermes"
+        case missionInputModeChanged = "mission_input_mode_changed"
         case missionOutputChunk = "mission_output_chunk"
         case missionPausedForApproval = "mission_paused_for_approval"
         case missionRecoveryAttempt = "mission_recovery_attempt"

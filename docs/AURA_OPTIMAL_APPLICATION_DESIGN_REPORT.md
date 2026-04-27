@@ -253,7 +253,8 @@ Must show:
 
 Primary actions:
 
-- New Mission
+- New Mission / Start Listening, depending on the user-selected mission input
+  mode
 - Open Activity
 - Open Readiness
 - Cancel Mission
@@ -266,10 +267,11 @@ MVP:
 - text input remains first-class.
 - voice is launched through Hermes Voice Mode, not an AURA transcription path.
 
-AURA should provide a native entry point into project-local Hermes voice mode
-and clear setup/status affordances. Hermes owns microphone recording, silence
-detection, speech-to-text, text-to-speech, continuous voice loop behavior, and
-voice configuration.
+AURA should provide a mission input setting for Text or Voice during onboarding
+and in Settings. The hotkey follows that setting: Text opens AURA's composer;
+Voice opens project-local Hermes Voice Mode and enables `/voice on`. Hermes owns
+microphone recording, silence detection, speech-to-text, text-to-speech,
+continuous voice loop behavior, and voice configuration.
 
 ### 3. Worker Stack
 
@@ -629,22 +631,24 @@ Acceptance:
 
 Tasks:
 
-1. Add an AURA action labeled "Open Hermes Voice Mode".
-2. Launch or foreground an interactive project-local Hermes surface through
+1. Add a mission input setting for Text or Voice in onboarding and Settings.
+2. Route the mission hotkey through that setting.
+3. Launch or foreground an interactive project-local Hermes surface through
    `script/aura-hermes`, never a global Hermes install.
-3. Show setup hints and diagnostics for Hermes voice prerequisites:
+4. Show setup hints and diagnostics for Hermes voice prerequisites:
    `hermes-agent[voice]` dependencies, PortAudio, ffmpeg, `voice`, `stt`, and
    `tts` config in `.aura/hermes-home/config.yaml`. Use Hermes'
    `tools.voice_mode.check_voice_requirements()` as the authoritative runtime
    probe.
-4. Prefer Hermes local STT with `faster-whisper` when available, since it needs
+5. Prefer Hermes local STT with `faster-whisper` when available, since it needs
    no API key. Cloud STT/TTS providers remain Hermes configuration.
-5. Link the user to Hermes voice commands: `/voice on`, `/voice off`,
+6. Link the user to Hermes voice commands: `/voice on`, `/voice off`,
    `/voice tts`, `/voice status`, and configurable `voice.record_key`.
 
 Acceptance:
 
-- Hermes voice mode opens from AURA using the project-local runtime.
+- Voice input mode opens Hermes voice mode from the mission hotkey using the
+  project-local runtime.
 - `/voice status` works in the launched Hermes surface.
 - AURA does not capture, transcribe, store, or score audio/transcripts itself.
 - AURA does not request macOS microphone permission directly unless a future

@@ -36,6 +36,18 @@ final class AURAStore: ObservableObject {
     @Published private(set) var hermesSessionsUpdated: Date?
     @Published private(set) var isRunning = false
     @Published var missionGoal = ""
+    @Published var inputMode: MissionInputMode {
+        didSet {
+            UserDefaults.standard.set(inputMode.rawValue, forKey: Self.inputModeKey)
+            AURATelemetry.info(
+                .missionInputModeChanged,
+                category: .ui,
+                fields: [.string("input_mode", self.inputMode.rawValue)],
+                audit: .governance
+            )
+            updateCursorIndicator()
+        }
+    }
     @Published var isAmbientEnabled = true {
         didSet {
             AURATelemetry.info(
@@ -79,7 +91,7 @@ final class AURAStore: ObservableObject {
     private lazy var cuaDriverService = CuaDriverService(hermesService: hermesService)
     private let cursorSurface = CursorSurfaceController()
     private lazy var globalHotKey = GlobalHotKeyController { [weak self] in
-        self?.showAmbientEntryPoint()
+        self?.openMissionInput()
     }
     private var missionProcess: Process?
     private var missionTimeoutTask: Task<Void, Never>?
@@ -92,6 +104,7 @@ final class AURAStore: ObservableObject {
     private var missionOutputChunkCount = 0
     private var missionRetryCount = 0
     private var lastHostControlReady: Bool?
+    private static let inputModeKey = "AURAMissionInputMode"
     private static let hermesToolSurfaceIdentifier = "hermes_config"
     private static let missionTimeoutSeconds: UInt64 = 300
 
@@ -104,13 +117,18 @@ final class AURAStore: ObservableObject {
     }
 
     init() {
+        let storedInputMode = UserDefaults.standard.string(forKey: Self.inputModeKey)
+        inputMode = MissionInputMode(rawValue: storedInputMode ?? "") ?? .text
         updateCursorIndicator()
         syncHostControlAvailability()
         startReadinessMonitor()
         AURATelemetry.info(
             .storeInitialized,
             category: .mission,
-            fields: [.string("tool_surface", Self.hermesToolSurfaceIdentifier)],
+            fields: [
+                .string("tool_surface", Self.hermesToolSurfaceIdentifier),
+                .string("input_mode", self.inputMode.rawValue)
+            ],
             audit: .lifecycle
         )
     }
@@ -158,10 +176,6 @@ final class AURAStore: ObservableObject {
 
     var hermesToolSurfaceSystemImage: String {
         "slider.horizontal.3"
-    }
-
-    var hermesVoiceModeSummary: String {
-        "Hermes owns microphone recording, silence detection, STT, TTS, and the continuous voice loop. Use /voice status, /voice on, /voice off, and /voice tts inside the launched Hermes surface."
     }
 
     func refreshAll(traceID: String = AURATelemetry.makeTraceID(prefix: "refresh")) async {
@@ -247,6 +261,47 @@ final class AURAStore: ObservableObject {
         }
     }
 
+    func openMissionInput() {
+        switch inputMode {
+        case .text:
+            showAmbientEntryPoint()
+        case .voice:
+            openVoiceEntryPoint()
+        }
+    }
+
+    private func openVoiceEntryPoint() {
+        guard canOpenAmbientEntryPoint else {
+            AURATelemetry.warning(
+                .ambientPanelBlocked,
+                category: .ui,
+                fields: [
+                    .bool("cua_ready", self.cuaStatus.readyForHostControl),
+                    .bool("onboarding", self.isRunningCuaOnboarding),
+                    .string("input_mode", self.inputMode.rawValue)
+                ],
+                audit: .governance
+            )
+            blockAmbientEntryPoint()
+            NSApp.activate(ignoringOtherApps: true)
+            return
+        }
+
+        if !isAmbientEnabled {
+            isAmbientEnabled = true
+        }
+
+        isShortcutPulseActive = true
+        updateCursorIndicator()
+        openHermesVoiceMode(autoEnable: true)
+
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 1_400_000_000)
+            isShortcutPulseActive = false
+            updateCursorIndicator()
+        }
+    }
+
     func triggerAmbientShortcut() {
         guard canOpenAmbientEntryPoint else {
             AURATelemetry.warning(
@@ -254,7 +309,8 @@ final class AURAStore: ObservableObject {
                 category: .ui,
                 fields: [
                     .bool("cua_ready", self.cuaStatus.readyForHostControl),
-                    .bool("onboarding", self.isRunningCuaOnboarding)
+                    .bool("onboarding", self.isRunningCuaOnboarding),
+                    .string("input_mode", self.inputMode.rawValue)
                 ],
                 audit: .governance
             )
@@ -273,7 +329,8 @@ final class AURAStore: ObservableObject {
             traceID: traceID,
             fields: [
                 .string("status", self.missionStatus.title),
-                .bool("has_pending_approval", self.pendingApproval != nil)
+                .bool("has_pending_approval", self.pendingApproval != nil),
+                .string("input_mode", self.inputMode.rawValue)
             ]
         )
         captureContext(traceID: traceID)
@@ -301,7 +358,8 @@ final class AURAStore: ObservableObject {
                 category: .ui,
                 fields: [
                     .bool("cua_ready", self.cuaStatus.readyForHostControl),
-                    .bool("onboarding", self.isRunningCuaOnboarding)
+                    .bool("onboarding", self.isRunningCuaOnboarding),
+                    .string("input_mode", self.inputMode.rawValue)
                 ],
                 audit: .governance
             )
@@ -317,7 +375,8 @@ final class AURAStore: ObservableObject {
             traceID: traceID,
             fields: [
                 .string("status", self.missionStatus.title),
-                .bool("has_pending_approval", self.pendingApproval != nil)
+                .bool("has_pending_approval", self.pendingApproval != nil),
+                .string("input_mode", self.inputMode.rawValue)
             ]
         )
 
@@ -924,7 +983,10 @@ final class AURAStore: ObservableObject {
         )
     }
 
-    func openHermesVoiceMode(traceID: String = AURATelemetry.makeTraceID(prefix: "voice")) {
+    func openHermesVoiceMode(
+        autoEnable: Bool = true,
+        traceID: String = AURATelemetry.makeTraceID(prefix: "voice")
+    ) {
         let command = """
         cd \(Self.shellQuoted(AURAPaths.projectRoot.path))
         clear
@@ -936,10 +998,11 @@ final class AURAStore: ObservableObject {
         ./script/aura-hermes
         """
 
+        let enableCommand = autoEnable ? "\n            delay 1.5\n            do script \"/voice on\" in auraVoiceTab" : ""
         let script = """
         tell application "Terminal"
             activate
-            do script \(Self.appleScriptString(command))
+            set auraVoiceTab to do script \(Self.appleScriptString(command))\(enableCommand)
         end tell
         """
 
@@ -951,13 +1014,18 @@ final class AURAStore: ObservableObject {
         do {
             try process.run()
             lastCommand = "open Hermes voice mode"
-            lastOutput = "Opened project-local Hermes in Terminal. Use /voice status, then /voice on when dependencies are present."
+            lastOutput = autoEnable
+                ? "Opened project-local Hermes in Terminal and requested /voice on."
+                : "Opened project-local Hermes in Terminal. Use /voice status, then /voice on when dependencies are present."
             lastUpdated = Date()
             AURATelemetry.info(
                 .voiceModeOpenRequested,
                 category: .ui,
                 traceID: traceID,
-                fields: [.string("surface", "terminal")],
+                fields: [
+                    .string("surface", "terminal"),
+                    .bool("auto_enable", autoEnable)
+                ],
                 audit: .action
             )
         } catch {

@@ -27,6 +27,49 @@ enum MissionStatus {
     }
 }
 
+enum MissionInputMode: String, CaseIterable, Identifiable {
+    case text
+    case voice
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .text:
+            return "Text"
+        case .voice:
+            return "Voice"
+        }
+    }
+
+    var summary: String {
+        switch self {
+        case .text:
+            return "The mission hotkey opens AURA's text composer."
+        case .voice:
+            return "The mission hotkey opens project-local Hermes Voice Mode and enables /voice on. Hermes owns microphone capture, STT, and TTS."
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .text:
+            return "keyboard"
+        case .voice:
+            return "mic"
+        }
+    }
+
+    var actionTitle: String {
+        switch self {
+        case .text:
+            return "New Mission"
+        case .voice:
+            return "Start Listening"
+        }
+    }
+}
+
 struct ApprovalRequest: Identifiable {
     let id: UUID
     let reason: String

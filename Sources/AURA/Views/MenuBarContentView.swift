@@ -68,17 +68,13 @@ struct MenuBarContentView: View {
                     NSApp.activate(ignoringOtherApps: true)
                 }
 
-                Button("Open Hermes Voice Mode") {
-                    store.openHermesVoiceMode()
-                }
-
                 Button("Refresh") {
                     Task { await store.refreshAll() }
                 }
                 .disabled(store.isRunning)
 
-                Button("New Mission") {
-                    store.showAmbientEntryPoint()
+                Button(store.inputMode.actionTitle) {
+                    store.openMissionInput()
                 }
                 .keyboardShortcut("a", modifiers: [.control, .option, .command])
                 .disabled(!store.canOpenAmbientEntryPoint)

@@ -568,8 +568,9 @@ reliable way to enter Hermes Voice Mode.
 
 Deliverables:
 
-- Add "Open Hermes Voice Mode" in AURA.
-- Launch project-local Hermes through `script/aura-hermes`, never global Hermes.
+- Add a Text/Voice mission input setting in onboarding and Settings.
+- Route the mission hotkey through that setting: Text opens the composer; Voice
+  opens project-local Hermes through `script/aura-hermes`, never global Hermes.
 - Show Hermes voice setup/status hints sourced from `check_voice_requirements`.
 - Keep microphone capture, transcription, TTS, record key, and continuous voice
   loop inside Hermes.
@@ -725,7 +726,7 @@ Legend:
 | Area | Demo behavior | AURA status | Launch check |
 |---|---|---|---|
 | Hotkey ambient entry | Agent is available from the Mac desktop. | Partial. AURA has `Ctrl+Option+Cmd+A` and cursor panel. | Required: keep hotkey/panel stable and verified with `build_and_run.sh --verify`. |
-| Voice invocation | User speaks every mission. | Hermes Voice Mode launcher/status is in progress. | Should: open project-local Hermes Voice Mode and verify `/voice status`; do not build AURA-native STT. |
+| Voice invocation | User speaks every mission. | Text/Voice mission input setting routes the hotkey to AURA composer or Hermes Voice Mode. | Should: verify `/voice status`; do not build AURA-native STT. |
 | Hold-to-talk | Demo feels push-to-talk/always ready. | Missing. Current hotkey is tap-to-open. | Later: implement only after global key-up tracking is tested. |
 | Agent spawning | User says "agent" and multiple background agents run. | Backend strong. Hermes `delegate_task` supports isolated child agents and parallel batches; AURA launches one parent mission. | Required: prove delegation through AURA and surface delegated progress clearly enough in mission output. |
 | Per-agent visibility | Demo shows/mentions hoverable agent state. | Backend partial, UI missing. Hermes has CLI tree/gateway progress; AURA has no per-worker cards. | Should: add compact worker/progress summaries from Hermes output/session data before a polished public demo. |
