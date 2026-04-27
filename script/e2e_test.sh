@@ -195,6 +195,11 @@ assert_contains "$(<"$ROOT_DIR/config/hermes-default.yaml")" "include:" "Hermes 
 assert_contains "$(<"$ROOT_DIR/config/hermes-default.yaml")" "check_permissions" "Hermes CUA config template"
 assert_contains "$(<"$ROOT_DIR/config/hermes-default.yaml")" "screenshot" "Hermes CUA config template"
 
+section "Connection matrix"
+run_capture "$TMP_DIR/connection-matrix.txt" "$ROOT_DIR/script/connection_matrix.sh"
+connection_matrix="$(<"$TMP_DIR/connection-matrix.txt")"
+assert_contains "$connection_matrix" "AURA connection matrix checks passed." "connection matrix"
+
 section "Real quiet mission"
 run_capture "$TMP_DIR/mission.txt" \
   "$HERMES" chat -Q --source aura-e2e --max-turns 1 \

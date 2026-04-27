@@ -361,6 +361,7 @@ show a Readiness Center derived from bounded commands and local passive checks:
 - `./script/aura-hermes config check`
 - `./script/aura-hermes cron list`
 - `./script/aura-hermes skills list`
+- `./script/connection_matrix.sh`
 - CUA passive permission checks
 - local config template presence
 
@@ -726,6 +727,7 @@ Create issues in this order:
 
 ### Connection readiness
 
+- `./script/connection_matrix.sh` passes.
 - Hermes provider/model ready.
 - CUA ready and MCP registered.
 - Hermes configured CUA include list exposes only intended tools.
