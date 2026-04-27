@@ -13,6 +13,7 @@ struct ContentView: View {
                     DashboardHeader(store: store)
                     StatusGrid(store: store)
                     MissionConfigurationCard(store: store)
+                    ReadinessCenterView(store: store)
                     MissionRunnerView(store: store)
                     HermesSessionsCard(store: store)
                     HermesControlCard(store: store)

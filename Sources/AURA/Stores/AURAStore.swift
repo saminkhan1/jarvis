@@ -36,6 +36,9 @@ final class AURAStore: ObservableObject {
     @Published private(set) var hermesSessionsUpdated: Date?
     @Published private(set) var hermesConfigSummary: HermesConfigSummary = .unavailable
     @Published private(set) var isApplyingHermesConfig = false
+    @Published private(set) var readinessItems: [ReadinessItem] = []
+    @Published private(set) var readinessUpdated: Date?
+    @Published private(set) var isRefreshingReadiness = false
     @Published private(set) var isRunning = false
     @Published var missionGoal = ""
     @Published var inputMode: MissionInputMode {
@@ -91,6 +94,7 @@ final class AURAStore: ObservableObject {
 
     private let hermesService = HermesService()
     private let hermesConfigService = HermesConfigService()
+    private let hermesReadinessService = HermesReadinessService()
     private lazy var cuaDriverService = CuaDriverService(hermesService: hermesService)
     private let cursorSurface = CursorSurfaceController()
     private lazy var globalHotKey = GlobalHotKeyController { [weak self] in
@@ -190,6 +194,7 @@ final class AURAStore: ObservableObject {
         await refreshHermesConfigStatus(traceID: traceID)
         await refreshStatus(traceID: traceID)
         await refreshCuaStatus(traceID: traceID)
+        await refreshConnectionReadiness(traceID: traceID)
         if cuaStatus.readyForHostControl {
             await refreshHermesSessions(traceID: traceID)
         }
@@ -216,6 +221,7 @@ final class AURAStore: ObservableObject {
         await refreshHermesConfigStatus(traceID: traceID)
         await refreshStatus(traceID: traceID)
         await refreshPermissionStatus(traceID: traceID)
+        await refreshConnectionReadiness(traceID: traceID)
         if cuaStatus.readyForHostControl {
             await refreshHermesSessions(traceID: traceID)
         }
@@ -354,6 +360,33 @@ final class AURAStore: ObservableObject {
         }
 
         isApplyingHermesConfig = false
+        await refreshConnectionReadiness(traceID: traceID)
+    }
+
+    func refreshConnectionReadiness(traceID: String = AURATelemetry.makeTraceID(prefix: "readiness")) async {
+        guard !isRefreshingReadiness else { return }
+
+        isRefreshingReadiness = true
+        let startedAt = Date()
+        readinessItems = await hermesReadinessService.refresh(
+            cuaStatus: cuaStatus,
+            hermesConfigSummary: hermesConfigSummary
+        )
+        readinessUpdated = Date()
+        isRefreshingReadiness = false
+
+        AURATelemetry.info(
+            .hermesUICommandFinish,
+            category: .hermes,
+            traceID: traceID,
+            fields: [
+                .string("operation", "readiness_refresh"),
+                .int("item_count", readinessItems.count),
+                .int("ready_count", readinessItems.filter { $0.status == .ready }.count),
+                .int("duration_ms", AURATelemetry.durationMilliseconds(from: startedAt))
+            ],
+            audit: .governance
+        )
     }
 
     func openMissionInput() {

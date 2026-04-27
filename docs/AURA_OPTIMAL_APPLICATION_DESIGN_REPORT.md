@@ -351,12 +351,16 @@ Each row should have:
 ## Hermes-Owned Connection Status
 
 AURA should not add a second capability planner or permission registry. It may
-show a status view derived from bounded commands and local passive checks:
+show a Readiness Center derived from bounded commands and local passive checks:
 
 - `./script/aura-hermes status`
 - `./script/aura-hermes doctor`
 - `./script/aura-hermes mcp list`
 - `./script/aura-hermes mcp test cua-driver`
+- `./script/aura-hermes tools list --platform cli`
+- `./script/aura-hermes config check`
+- `./script/aura-hermes cron list`
+- `./script/aura-hermes skills list`
 - CUA passive permission checks
 - local config template presence
 
@@ -588,7 +592,7 @@ Tasks:
 1. Keep CUA MCP transport lean and policy-free.
 2. Move CUA tool exposure to Hermes config.
 3. Add dashboard/onboarding/Settings controls for Hermes config type presets
-   that edit `.aura/hermes-home/config.yaml`.
+   through `script/aura-hermes tools ...` and `script/aura-hermes config set`.
 4. Parse bounded status from Hermes status/doctor and MCP list/test.
 5. Add readiness rows for Hermes, provider/model, CUA, web, browser, terminal,
    skills, messaging, cron, memory, external MCP.
