@@ -9,6 +9,10 @@ This is the current checklist before AURA can go to beta users.
 - CUA Driver is installed on this machine, running through a user LaunchAgent, and registered with project-local Hermes MCP.
 - First launch now runs passive CUA readiness checks and locks AURA into onboarding until Cua Driver is installed, daemonized, permissioned, and registered. Permission prompts are only user-clicked from onboarding, use Cua Driver's explicit prompt mode, and never run from the mission workflow.
 - Normal Hermes missions use project-local Hermes config for tool exposure, including the `cua-driver` MCP registered as `script/aura-cua-mcp`. AURA no longer passes per-mission toolsets or CUA policy env gates.
+- The dashboard now exposes mission input mode, Hermes config type, and a
+  Readiness Center backed by project-local Hermes CLI checks.
+- `script/connection_matrix.sh` verifies the report connection packs against
+  the same commands shown in the UI.
 - Hermes sessions are shown from Hermes structured JSONL export.
 - Current `dist/AURA.app` is a local debug artifact, not a beta distributable.
 
@@ -51,9 +55,10 @@ This is the current checklist before AURA can go to beta users.
    - stapling
    - Gatekeeper validation on a clean machine
 
-4. Finish beta onboarding and recovery UI.
+4. Finish standalone beta onboarding and recovery UI.
 
-   CUA hard-gate onboarding is in place. The app still needs cleaner standalone recovery for:
+   CUA hard-gate onboarding and repo-backed readiness rows are in place. The app
+   still needs cleaner standalone recovery for:
 
    - Hermes runtime missing
    - Hermes auth/setup needed
@@ -70,6 +75,7 @@ This is the current checklist before AURA can go to beta users.
 
 ```bash
 ./script/e2e_test.sh
+./script/connection_matrix.sh
 ./script/build_and_run.sh --verify
 ./script/aura-hermes status
 ./script/aura-hermes mcp list
@@ -86,9 +92,18 @@ security find-identity -p codesigning -v
 xcrun notarytool --help
 ```
 
+## Repo-Backed Local Bootstrap
+
+This pass supports repo-backed and local `dist/AURA.app` startup only:
+
+1. `./script/setup.sh --check` validates the project-local runtime.
+2. `./script/connection_matrix.sh` validates Hermes/CUA/tool connection packs.
+3. `./script/build_and_run.sh --verify` checks the repo-local runtime before
+   launching `dist/AURA.app` with `AURA_PROJECT_ROOT` set to this checkout.
+
 ## Minimum Next Implementation Slice
 
-Make the app runtime-location aware:
+Make the app runtime-location aware for a future standalone beta:
 
 1. Keep repo-backed development working exactly as-is.
 2. Add a user Application Support runtime path for standalone builds.

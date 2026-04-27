@@ -46,6 +46,7 @@ Developer ID signed, notarized, stapled, standalone beta build yet.
 
    ```bash
    ./script/aura-hermes doctor
+   ./script/connection_matrix.sh
    ./script/e2e_test.sh
    ./script/build_and_run.sh --verify
    ```
@@ -61,6 +62,7 @@ Developer ID signed, notarized, stapled, standalone beta build yet.
 ```bash
 ./script/setup.sh --check
 ./script/aura-hermes doctor
+./script/connection_matrix.sh
 ./script/e2e_test.sh
 ./script/build_and_run.sh --verify
 ```
@@ -72,9 +74,17 @@ Developer ID signed, notarized, stapled, standalone beta build yet.
 ./script/aura-hermes doctor
 ./script/aura-hermes status
 ./script/aura-hermes mcp list
+./script/connection_matrix.sh
 ./script/aura-logs stream
 ./script/aura-logs audit
 ```
+
+## Local App Bundle Runtime
+
+`./script/build_and_run.sh` builds `dist/AURA.app`, checks that the repo-local
+Hermes runtime exists, and launches the app with `AURA_PROJECT_ROOT` pointing at
+this checkout. Moving `dist/AURA.app` outside the repo is not supported in this
+pass; Developer ID signing and notarization remain release work.
 
 ## What AURA Does
 

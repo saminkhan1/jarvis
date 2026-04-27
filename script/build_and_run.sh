@@ -16,6 +16,32 @@ INFO_PLIST="$APP_CONTENTS/Info.plist"
 
 pkill -x "$APP_NAME" >/dev/null 2>&1 || true
 
+check_runtime() {
+  local missing=0
+
+  if [[ ! -x "$ROOT_DIR/script/aura-hermes" ]]; then
+    echo "Missing project-local Hermes wrapper: $ROOT_DIR/script/aura-hermes" >&2
+    missing=1
+  fi
+
+  if [[ ! -x "$ROOT_DIR/.aura/hermes-agent/venv/bin/python3" && ! -x "$ROOT_DIR/.aura/hermes-agent/venv/bin/python" ]]; then
+    echo "Missing project-local Hermes Python runtime under .aura/hermes-agent/venv" >&2
+    missing=1
+  fi
+
+  if [[ ! -f "$ROOT_DIR/.aura/hermes-home/config.yaml" ]]; then
+    echo "Missing project-local Hermes config: .aura/hermes-home/config.yaml" >&2
+    missing=1
+  fi
+
+  if (( missing > 0 )); then
+    echo "Run: cd \"$ROOT_DIR\" && ./script/setup.sh" >&2
+    exit 1
+  fi
+}
+
+check_runtime
+
 swift build --product "$APP_NAME"
 BUILD_BINARY="$(swift build --show-bin-path)/$APP_NAME"
 

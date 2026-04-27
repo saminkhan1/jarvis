@@ -698,6 +698,30 @@ Implement and test in this order:
 6. Schedule pack: Hermes cron create/list/pause/resume/edit.
 7. External MCP pack: GitHub or filesystem MCP as first non-CUA example.
 
+### Phase 7: Repo-Backed Bootstrap And QA
+
+This pass supports fresh-clone and local `dist/AURA.app` startup only.
+Developer ID signing, notarization, stapling, and a relocatable standalone
+runtime remain credential- and packaging-dependent release work.
+
+Tasks:
+
+1. Keep `./script/setup.sh --check` as the fresh-clone runtime preflight.
+2. Add `./script/connection_matrix.sh` to verify report connection packs.
+3. Make `./script/build_and_run.sh` fail early when the repo-local Hermes
+   runtime/config are missing.
+4. Document that `dist/AURA.app` must be launched through the repo script in
+   this pass because the script supplies `AURA_PROJECT_ROOT`.
+
+Acceptance:
+
+- Fresh clone: setup check points to missing repo-local runtime steps.
+- Local bundle: `./script/build_and_run.sh --verify` confirms the app can launch
+  from `dist/AURA.app` while still using project-local Hermes.
+- Final QA runs `./script/setup.sh --check`, `./script/aura-hermes doctor`,
+  `./script/connection_matrix.sh`, `./script/e2e_test.sh`, and
+  `./script/build_and_run.sh --verify`.
+
 ## Issue Breakdown
 
 Create issues in this order:
