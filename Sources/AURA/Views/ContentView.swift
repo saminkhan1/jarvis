@@ -12,6 +12,7 @@ struct ContentView: View {
                 } else {
                     DashboardHeader(store: store)
                     StatusGrid(store: store)
+                    MissionConfigurationCard(store: store)
                     MissionRunnerView(store: store)
                     HermesSessionsCard(store: store)
                     HermesControlCard(store: store)
@@ -64,6 +65,15 @@ private struct OnboardingGateView: View {
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.secondary)
                 MissionInputModePicker(store: store)
+            }
+            .padding(12)
+            .background(Color.primary.opacity(0.045), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Hermes Config Type")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                HermesConfigTypePicker(store: store)
             }
             .padding(12)
             .background(Color.primary.opacity(0.045), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
@@ -311,6 +321,93 @@ private struct StatusTile: View {
     }
 }
 
+private struct MissionConfigurationCard: View {
+    @ObservedObject var store: AURAStore
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack {
+                Label("Mission Configuration", systemImage: "slider.horizontal.3")
+                    .font(.headline)
+
+                Spacer()
+
+                if store.isApplyingHermesConfig {
+                    ProgressView()
+                        .controlSize(.small)
+                }
+
+                Button {
+                    Task { await store.refreshHermesConfigStatus() }
+                } label: {
+                    Label("Refresh", systemImage: "arrow.clockwise")
+                }
+                .disabled(store.isApplyingHermesConfig)
+            }
+
+            HStack(alignment: .top, spacing: 18) {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Input")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                    MissionInputModePicker(store: store)
+                }
+                .frame(maxWidth: .infinity, alignment: .topLeading)
+
+                Divider()
+
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Config Type")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                    HermesConfigTypePicker(store: store)
+                }
+                .frame(maxWidth: .infinity, alignment: .topLeading)
+            }
+
+            HStack(spacing: 12) {
+                ConfigMetric(title: "Approvals", value: store.hermesConfigSummary.approvalMode)
+                ConfigMetric(title: "CUA", value: store.hermesConfigSummary.cuaSurfaceTitle)
+                ConfigMetric(title: "Toolsets", value: "\(store.hermesConfigSummary.cliToolsets.count)")
+
+                Spacer()
+
+                Button {
+                    store.openHermesConfigFile()
+                } label: {
+                    Label("Open Config", systemImage: "doc.text")
+                }
+
+                Button {
+                    store.revealHermesConfigFile()
+                } label: {
+                    Label("Reveal", systemImage: "folder")
+                }
+            }
+            .font(.caption)
+        }
+        .padding(18)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+    }
+}
+
+private struct ConfigMetric: View {
+    let title: String
+    let value: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(title.uppercased())
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+            Text(value)
+                .font(.caption.weight(.semibold))
+                .lineLimit(1)
+        }
+        .frame(minWidth: 76, alignment: .leading)
+    }
+}
+
 private struct HermesSessionsCard: View {
     @ObservedObject var store: AURAStore
 
@@ -471,7 +568,7 @@ private struct HermesControlCard: View {
             }
             .disabled(store.isRunning)
 
-            Text("Mission input mode is configured in Settings and during onboarding.")
+            Text("Mission input and Hermes config type can be changed from the dashboard, Settings, or onboarding.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)

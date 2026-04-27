@@ -267,11 +267,34 @@ MVP:
 - text input remains first-class.
 - voice is launched through Hermes Voice Mode, not an AURA transcription path.
 
-AURA should provide a mission input setting for Text or Voice during onboarding
-and in Settings. The hotkey follows that setting: Text opens AURA's composer;
-Voice opens project-local Hermes Voice Mode and enables `/voice on`. Hermes owns
-microphone recording, silence detection, speech-to-text, text-to-speech,
-continuous voice loop behavior, and voice configuration.
+AURA should provide a mission input setting for Text or Voice on the dashboard,
+during onboarding, and in Settings. The hotkey follows that setting: Text opens
+AURA's composer; Voice opens project-local Hermes Voice Mode and enables
+`/voice on`. Hermes owns microphone recording, silence detection,
+speech-to-text, text-to-speech, continuous voice loop behavior, and voice
+configuration.
+
+### 2A. Hermes Config Type
+
+Purpose: let the user choose the project-local Hermes config posture without
+AURA becoming a permission router.
+
+The dashboard, onboarding, and Settings should expose a Config Type control:
+
+- Read Only: research/context/memory/skills/planning toolsets and CUA read tools.
+- Ask Per Task: local toolsets and CUA action tools are configured, while Hermes
+  dangerous-command approvals remain on.
+- Always Allow: local toolsets and CUA action tools are configured, and Hermes
+  dangerous-command prompts are disabled through config for local work.
+
+Implementation boundary:
+
+- The control uses the project-local Hermes CLI directly (`script/aura-hermes
+  tools enable/disable` and `script/aura-hermes config set`) and reads only
+  non-secret config status from `.aura/hermes-home/config.yaml`.
+- It never reads `.env`, never displays secrets, and never passes per-mission
+  `-t`, policy env vars, or global Hermes state.
+- Hermes remains the owner of actual tool exposure and approval behavior.
 
 ### 3. Worker Stack
 
@@ -344,6 +367,8 @@ Rules:
 - Do not infer tool permissions from AURA state.
 - Treat Hermes config as authoritative for which tools exist and what approvals
   are required.
+- AURA may offer config type presets only by invoking project-local Hermes CLI
+  config commands; it must not enforce them as a mission-time middle layer.
 - When setup is missing, show the Hermes/CUA command that diagnoses it instead
   of blocking missions with a custom classifier.
 
@@ -375,8 +400,8 @@ Mission launch rules:
 
 - Do not pass `-t` from AURA.
 - Do not pass `AURA_AUTOMATION_POLICY` or `AURA_CUA_ALLOW_ACTIONS`.
-- Include only goal, context snapshot, CUA readiness, and AURA safety copy in
-  the mission envelope.
+- Include only goal, context snapshot, current Hermes config summary, CUA
+  readiness, and AURA safety copy in the mission envelope.
 - If Hermes returns `NEEDS_APPROVAL`, AURA presents the approval and resumes the
   same Hermes session without changing toolsets.
 
@@ -562,11 +587,13 @@ Tasks:
 
 1. Keep CUA MCP transport lean and policy-free.
 2. Move CUA tool exposure to Hermes config.
-3. Parse bounded status from Hermes status/doctor and MCP list/test.
-4. Add readiness rows for Hermes, provider/model, CUA, web, browser, terminal,
+3. Add dashboard/onboarding/Settings controls for Hermes config type presets
+   that edit `.aura/hermes-home/config.yaml`.
+4. Parse bounded status from Hermes status/doctor and MCP list/test.
+5. Add readiness rows for Hermes, provider/model, CUA, web, browser, terminal,
    skills, messaging, cron, memory, external MCP.
-5. Add test/fix actions where safe.
-6. Ensure no secrets are read into UI.
+6. Add test/fix actions where safe.
+7. Ensure no secrets are read into UI.
 
 Acceptance:
 

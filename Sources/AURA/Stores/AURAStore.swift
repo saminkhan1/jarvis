@@ -34,6 +34,8 @@ final class AURAStore: ObservableObject {
     @Published private(set) var hermesSessionsOutput = "Hermes sessions have not been checked yet."
     @Published private(set) var hermesSessions: [HermesSessionSummary] = []
     @Published private(set) var hermesSessionsUpdated: Date?
+    @Published private(set) var hermesConfigSummary: HermesConfigSummary = .unavailable
+    @Published private(set) var isApplyingHermesConfig = false
     @Published private(set) var isRunning = false
     @Published var missionGoal = ""
     @Published var inputMode: MissionInputMode {
@@ -88,6 +90,7 @@ final class AURAStore: ObservableObject {
     @Published private(set) var cuaOnboardingMessage = "Complete CUA setup before using AURA."
 
     private let hermesService = HermesService()
+    private let hermesConfigService = HermesConfigService()
     private lazy var cuaDriverService = CuaDriverService(hermesService: hermesService)
     private let cursorSurface = CursorSurfaceController()
     private lazy var globalHotKey = GlobalHotKeyController { [weak self] in
@@ -167,21 +170,24 @@ final class AURAStore: ObservableObject {
     }
 
     var hermesToolSurfaceTitle: String {
-        "Hermes config"
+        hermesConfigSummary.configType == .unavailable ? "Hermes config" : hermesConfigSummary.title
     }
 
     var hermesToolSurfaceSummary: String {
-        "Tool exposure, MCP servers, approvals, and provider setup are owned by project-local Hermes in .aura/hermes-home/config.yaml."
+        hermesConfigSummary.configType == .unavailable
+            ? "Tool exposure, MCP servers, approvals, and provider setup are owned by project-local Hermes in .aura/hermes-home/config.yaml."
+            : hermesConfigSummary.summary
     }
 
     var hermesToolSurfaceSystemImage: String {
-        "slider.horizontal.3"
+        hermesConfigSummary.configType == .unavailable ? "slider.horizontal.3" : hermesConfigSummary.configType.systemImage
     }
 
     func refreshAll(traceID: String = AURATelemetry.makeTraceID(prefix: "refresh")) async {
         let startedAt = Date()
         AURATelemetry.info(.refreshAllStart, category: .hermes, traceID: traceID)
         await refreshVersion(traceID: traceID)
+        await refreshHermesConfigStatus(traceID: traceID)
         await refreshStatus(traceID: traceID)
         await refreshCuaStatus(traceID: traceID)
         if cuaStatus.readyForHostControl {
@@ -207,6 +213,7 @@ final class AURAStore: ObservableObject {
         let startedAt = Date()
         AURATelemetry.info(.launchOnboardingStart, category: .hermes, traceID: traceID, audit: .lifecycle)
         await refreshVersion(traceID: traceID)
+        await refreshHermesConfigStatus(traceID: traceID)
         await refreshStatus(traceID: traceID)
         await refreshPermissionStatus(traceID: traceID)
         if cuaStatus.readyForHostControl {
@@ -259,6 +266,94 @@ final class AURAStore: ObservableObject {
                 fields: [.int("count", sessions.count)]
             )
         }
+    }
+
+    func refreshHermesConfigStatus(traceID: String = AURATelemetry.makeTraceID(prefix: "hermes-config")) async {
+        do {
+            hermesConfigSummary = try await hermesConfigService.status()
+        } catch {
+            hermesConfigSummary = HermesConfigSummary(
+                configType: .unavailable,
+                title: "Unavailable",
+                summary: error.localizedDescription,
+                approvalMode: "unknown",
+                cronMode: "unknown",
+                cliToolsets: [],
+                cuaSurface: "unknown",
+                cuaTools: [],
+                readCuaToolCount: 0,
+                actionCuaToolCount: 0,
+                configPath: AURAPaths.hermesHome.appendingPathComponent("config.yaml").path,
+                warnings: [error.localizedDescription]
+            )
+            AURATelemetry.warning(
+                .hermesUICommandFailed,
+                category: .hermes,
+                traceID: traceID,
+                fields: [
+                    .string("operation", "hermes_config_status"),
+                    .string("error_type", String(describing: type(of: error)))
+                ],
+                audit: .governance
+            )
+        }
+    }
+
+    func applyHermesConfigType(
+        _ configType: HermesConfigType,
+        traceID: String = AURATelemetry.makeTraceID(prefix: "hermes-config-apply")
+    ) async {
+        guard configType.isSelectable else { return }
+        guard !isApplyingHermesConfig else { return }
+
+        isApplyingHermesConfig = true
+        lastCommand = "apply Hermes config \(configType.title)"
+        AURATelemetry.info(
+            .hermesUICommandStart,
+            category: .hermes,
+            traceID: traceID,
+            fields: [
+                .string("operation", "hermes_config_apply"),
+                .string("config_type", configType.rawValue)
+            ],
+            audit: .governance
+        )
+
+        do {
+            hermesConfigSummary = try await hermesConfigService.apply(configType)
+            lastOutput = "Applied \(hermesConfigSummary.title) Hermes config.\n\(hermesConfigSummary.detailLine)"
+            lastUpdated = Date()
+            AURATelemetry.info(
+                .hermesUICommandFinish,
+                category: .hermes,
+                traceID: traceID,
+                fields: [
+                    .string("operation", "hermes_config_apply"),
+                    .string("config_type", hermesConfigSummary.configType.rawValue),
+                    .string("approval_mode", hermesConfigSummary.approvalMode),
+                    .int("cli_toolset_count", hermesConfigSummary.cliToolsets.count),
+                    .int("cua_action_tool_count", hermesConfigSummary.actionCuaToolCount)
+                ],
+                audit: .governance
+            )
+        } catch {
+            lastOutput = "Could not apply \(configType.title) Hermes config: \(error.localizedDescription)"
+            lastUpdated = Date()
+            AURATelemetry.error(
+                .hermesUICommandFailed,
+                category: .hermes,
+                traceID: traceID,
+                fields: [
+                    .string("operation", "hermes_config_apply"),
+                    .string("config_type", configType.rawValue),
+                    .string("error_type", String(describing: type(of: error)))
+                ],
+                audit: .governance
+            )
+            await refreshHermesConfigStatus(traceID: traceID)
+        }
+
+        isApplyingHermesConfig = false
     }
 
     func openMissionInput() {
@@ -744,7 +839,8 @@ final class AURAStore: ObservableObject {
         let envelope = Self.missionEnvelope(
             goal: trimmedGoal,
             contextSnapshot: snapshot,
-            cuaStatus: cuaStatus
+            cuaStatus: cuaStatus,
+            hermesConfigSummary: hermesConfigSummary
         )
 
         missionStatus = .running
@@ -856,7 +952,8 @@ final class AURAStore: ObservableObject {
             approvedAction: pendingApproval.reason,
             originalGoal: missionGoal,
             contextSnapshot: snapshot,
-            cuaStatus: cuaStatus
+            cuaStatus: cuaStatus,
+            hermesConfigSummary: hermesConfigSummary
         )
 
         let resumeArguments = hermesChatArguments(
@@ -981,6 +1078,22 @@ final class AURAStore: ObservableObject {
             category: .ui,
             fields: [.privateValue("path")]
         )
+    }
+
+    func openHermesConfigFile() {
+        let configURL = AURAPaths.hermesHome.appendingPathComponent("config.yaml")
+        NSWorkspace.shared.open(configURL)
+        lastCommand = "open Hermes config"
+        lastOutput = "Opened project-local Hermes config at \(configURL.path)"
+        lastUpdated = Date()
+    }
+
+    func revealHermesConfigFile() {
+        let configURL = AURAPaths.hermesHome.appendingPathComponent("config.yaml")
+        NSWorkspace.shared.activateFileViewerSelecting([configURL])
+        lastCommand = "reveal Hermes config"
+        lastOutput = "Revealed project-local Hermes config at \(configURL.path)"
+        lastUpdated = Date()
     }
 
     func openHermesVoiceMode(
@@ -1859,7 +1972,8 @@ final class AURAStore: ObservableObject {
     private static func missionEnvelope(
         goal: String,
         contextSnapshot: ContextSnapshot,
-        cuaStatus: CuaDriverStatus
+        cuaStatus: CuaDriverStatus,
+        hermesConfigSummary: HermesConfigSummary
     ) -> String {
         return """
         AURA MISSION ENVELOPE
@@ -1874,6 +1988,7 @@ final class AURAStore: ObservableObject {
 
         HERMES CONFIG AND TOOL SURFACE
         - Tool availability, MCP exposure, command approvals, provider setup, and voice configuration are owned by project-local Hermes config at .aura/hermes-home/config.yaml.
+        - Current AURA-selected config type: \(hermesConfigSummary.title) (\(hermesConfigSummary.detailLine)).
         - AURA does not choose Hermes toolsets for this mission and never uses global Hermes.
         - Use the tools Hermes exposes to you. If a required tool is unavailable, explain the missing Hermes config/setup step.
         - CUA readiness: \(cuaStatus.title)
@@ -1907,7 +2022,8 @@ final class AURAStore: ObservableObject {
         approvedAction: String,
         originalGoal: String,
         contextSnapshot: ContextSnapshot,
-        cuaStatus: CuaDriverStatus
+        cuaStatus: CuaDriverStatus,
+        hermesConfigSummary: HermesConfigSummary
     ) -> String {
         return """
         AURA APPROVAL CONTINUATION
@@ -1928,6 +2044,7 @@ final class AURAStore: ObservableObject {
 
         HERMES CONFIG AND TOOL SURFACE
         - Tool availability, MCP exposure, command approvals, and provider setup remain owned by project-local Hermes config.
+        - Current AURA-selected config type: \(hermesConfigSummary.title) (\(hermesConfigSummary.detailLine)).
         - AURA does not choose Hermes toolsets for this continuation.
         - CUA readiness: \(cuaStatus.title)
         - CUA is exposed through AURA's daemon-backed MCP transport proxy when registered in Hermes config.

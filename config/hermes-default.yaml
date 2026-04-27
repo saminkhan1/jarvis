@@ -26,6 +26,24 @@ agent:
   reasoning_effort: medium
   verbose: false
 
+approvals:
+  # AURA changes this through project-local Hermes CLI config commands, never
+  # by passing per-mission policy flags.
+  mode: manual
+  timeout: 60
+  cron_mode: deny
+
+platform_toolsets:
+  # Conservative default: read/research/context/planning tools only.
+  cli:
+    - web
+    - skills
+    - todo
+    - memory
+    - session_search
+    - clarify
+    - delegation
+
 display:
   streaming: true
   final_response_markdown: strip

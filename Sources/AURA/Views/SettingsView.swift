@@ -16,8 +16,25 @@ struct SettingsView: View {
             }
 
             Section("Hermes Tooling") {
+                HermesConfigTypePicker(store: store)
                 LabeledContent("Tool Surface", value: store.hermesToolSurfaceTitle)
+                LabeledContent("Approvals", value: store.hermesConfigSummary.approvalMode)
+                LabeledContent("CUA Tools", value: store.hermesConfigSummary.cuaSurfaceTitle)
                 LabeledContent("Config", value: AURAPaths.hermesHome.appendingPathComponent("config.yaml").path)
+
+                HStack {
+                    Button("Refresh Config") {
+                        Task { await store.refreshHermesConfigStatus() }
+                    }
+
+                    Button("Open Config") {
+                        store.openHermesConfigFile()
+                    }
+
+                    Button("Reveal Config") {
+                        store.revealHermesConfigFile()
+                    }
+                }
 
                 Text(store.hermesToolSurfaceSummary)
                     .font(.caption)
