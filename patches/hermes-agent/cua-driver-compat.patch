@@ -1,0 +1,433 @@
+diff --git a/agent/display.py b/agent/display.py
+index 474595d7..905ca842 100644
+--- a/agent/display.py
++++ b/agent/display.py
+@@ -810,6 +810,15 @@ def _detect_tool_failure(tool_name: str, result: str | None) -> tuple[bool, str]
+     """
+     if result is None:
+         return False, ""
++    if not isinstance(result, str):
++        try:
++            if isinstance(result, dict) and result.get("_multimodal"):
++                result = str(result.get("text_summary") or "[multimodal tool result]")
++            else:
++                import json as _json
++                result = _json.dumps(result, default=str)
++        except Exception:
++            result = str(result)
+ 
+     if tool_name == "terminal":
+         data = safe_json_loads(result)
+diff --git a/run_agent.py b/run_agent.py
+index 70d63d14..44347c17 100644
+--- a/run_agent.py
++++ b/run_agent.py
+@@ -8483,17 +8483,18 @@ class AIAgent:
+                     logger.error("handle_function_call raised for %s: %s", function_name, tool_error, exc_info=True)
+                 tool_duration = time.time() - tool_start_time
+ 
+-            result_preview = function_result if self.verbose_logging else (
+-                function_result[:200] if len(function_result) > 200 else function_result
++            result_text = _multimodal_text_summary(function_result)
++            result_preview = result_text if self.verbose_logging else (
++                result_text[:200] if len(result_text) > 200 else result_text
+             )
+ 
+             # Log tool errors to the persistent error log so [error] tags
+             # in the UI always have a corresponding detailed entry on disk.
+-            _is_error_result, _ = _detect_tool_failure(function_name, function_result)
++            _is_error_result, _ = _detect_tool_failure(function_name, result_text)
+             if _is_error_result:
+                 logger.warning("Tool %s returned error (%.2fs): %s", function_name, tool_duration, result_preview)
+             else:
+-                logger.info("tool %s completed (%.2fs, %d chars)", function_name, tool_duration, len(function_result))
++                logger.info("tool %s completed (%.2fs, %d chars)", function_name, tool_duration, len(result_text))
+ 
+             if self.tool_progress_callback:
+                 try:
+@@ -8549,9 +8550,9 @@ class AIAgent:
+             if not self.quiet_mode:
+                 if self.verbose_logging:
+                     print(f"  ✅ Tool {i} completed in {tool_duration:.2f}s")
+-                    print(self._wrap_verbose("Result: ", function_result))
++                    print(self._wrap_verbose("Result: ", _multimodal_text_summary(function_result)))
+                 else:
+-                    response_preview = function_result[:self.log_prefix_chars] + "..." if len(function_result) > self.log_prefix_chars else function_result
++                    response_preview = result_text[:self.log_prefix_chars] + "..." if len(result_text) > self.log_prefix_chars else result_text
+                     print(f"  ✅ Tool {i} completed in {tool_duration:.2f}s - {response_preview}")
+ 
+             if self._interrupt_requested and i < len(assistant_message.tool_calls):
+diff --git a/tests/tools/test_computer_use.py b/tests/tools/test_computer_use.py
+index 58700dca..c84ee390 100644
+--- a/tests/tools/test_computer_use.py
++++ b/tests/tools/test_computer_use.py
+@@ -156,6 +156,80 @@ class TestDispatch:
+         assert click_kw["button"] == "right"
+ 
+ 
++# ---------------------------------------------------------------------------
++# Cua-driver backend compatibility with current cua-driver MCP schema
++# ---------------------------------------------------------------------------
++
++class TestCuaDriverCurrentSchema:
++    def test_extract_tool_result_prefers_structured_content(self):
++        from types import SimpleNamespace
++        from tools.computer_use.cua_backend import _extract_tool_result
++
++        result = SimpleNamespace(
++            isError=False,
++            structuredContent={"element_count": 2, "tree_markdown": "- AXApplication \"AURA\""},
++            content=[SimpleNamespace(type="text", text="human formatted output")],
++        )
++
++        out = _extract_tool_result(result)
++
++        assert out["data"]["element_count"] == 2
++        assert out["data"]["tree_markdown"] == "- AXApplication \"AURA\""
++
++    def test_capture_uses_get_window_state_not_legacy_capture(self):
++        from tools.computer_use.cua_backend import CuaDriverBackend
++
++        class FakeSession:
++            def __init__(self):
++                self.calls = []
++            def call_tool(self, name, args, timeout=30.0):
++                self.calls.append((name, args))
++                if name == "list_windows":
++                    return {"data": {"windows": [
++                        {"app_name": "AURA", "pid": 123, "window_id": 456,
++                         "title": "AURA", "bounds": {"width": 800, "height": 600}}
++                    ]}, "images": [], "isError": False}
++                if name == "set_config":
++                    return {"data": {"ok": True}, "images": [], "isError": False}
++                if name == "get_window_state":
++                    return {"data": {
++                        "name": "AURA", "pid": 123, "screenshot_width": 800,
++                        "screenshot_height": 600, "tree_markdown": "- [1] AXButton \"Run\"",
++                    }, "images": ["iVBORw0KGgo="], "isError": False}
++                raise AssertionError(f"unexpected legacy/current tool call: {name}")
++
++        backend = CuaDriverBackend.__new__(CuaDriverBackend)
++        backend._session = FakeSession()
++
++        cap = backend.capture(mode="som", app="AURA")
++
++        assert [name for name, _ in backend._session.calls] == ["list_windows", "set_config", "get_window_state"]
++        assert cap.app == "AURA"
++        assert cap.width == 800
++        assert cap.height == 600
++        assert cap.elements[0].index == 1
++        assert cap.elements[0].role == "AXButton"
++        assert cap.elements[0].label == "Run"
++
++    def test_list_apps_uses_snake_case_tool_name(self):
++        from tools.computer_use.cua_backend import CuaDriverBackend
++
++        class FakeSession:
++            def __init__(self):
++                self.calls = []
++            def call_tool(self, name, args, timeout=30.0):
++                self.calls.append((name, args))
++                if name != "list_apps":
++                    raise AssertionError(f"unexpected tool call: {name}")
++                return {"data": {"apps": [{"name": "AURA", "pid": 123}]}, "images": [], "isError": False}
++
++        backend = CuaDriverBackend.__new__(CuaDriverBackend)
++        backend._session = FakeSession()
++
++        assert backend.list_apps() == [{"name": "AURA", "pid": 123}]
++        assert backend._session.calls == [("list_apps", {})]
++
++
+ # ---------------------------------------------------------------------------
+ # Safety guards (type / key block lists)
+ # ---------------------------------------------------------------------------
+diff --git a/tools/computer_use/cua_backend.py b/tools/computer_use/cua_backend.py
+index cdae02f5..14637c91 100644
+--- a/tools/computer_use/cua_backend.py
++++ b/tools/computer_use/cua_backend.py
+@@ -23,6 +23,7 @@ import json
+ import logging
+ import os
+ import platform
++import re
+ import shutil
+ import subprocess
+ import sys
+@@ -211,7 +212,8 @@ def _extract_tool_result(mcp_result: Any) -> Dict[str, Any]:
+     cua-driver returns a mix of json-text parts and image parts. We flatten:
+       {"data": <parsed json from text parts>, "images": [b64, ...], "isError": bool}
+     """
+-    data: Any = None
++    structured = getattr(mcp_result, "structuredContent", None)
++    data: Any = structured if structured is not None else None
+     images: List[str] = []
+     is_error = bool(getattr(mcp_result, "isError", False))
+     text_chunks: List[str] = []
+@@ -223,7 +225,7 @@ def _extract_tool_result(mcp_result: Any) -> Dict[str, Any]:
+             b64 = getattr(part, "data", None)
+             if b64:
+                 images.append(b64)
+-    if text_chunks:
++    if data is None and text_chunks:
+         joined = "\n".join(t for t in text_chunks if t)
+         try:
+             data = json.loads(joined) if joined.strip().startswith(("{", "[")) else joined
+@@ -242,6 +244,8 @@ class CuaDriverBackend(ComputerUseBackend):
+     def __init__(self) -> None:
+         self._bridge = _AsyncBridge()
+         self._session = _CuaDriverSession(self._bridge)
++        self._last_pid: Optional[int] = None
++        self._last_window_id: Optional[int] = None
+ 
+     # ── Lifecycle ──────────────────────────────────────────────────
+     def start(self) -> None:
+@@ -260,15 +264,28 @@ class CuaDriverBackend(ComputerUseBackend):
+ 
+     # ── Capture ────────────────────────────────────────────────────
+     def capture(self, mode: str = "som", app: Optional[str] = None) -> CaptureResult:
+-        args: Dict[str, Any] = {"mode": mode}
+-        if app:
+-            args["app"] = app
+-        out = self._session.call_tool("capture", args)
++        window = self._resolve_window(app)
++        if not window:
++            return CaptureResult(mode=mode, width=0, height=0, app=app or "",
++                                 window_title="", elements=[])
++
++        pid = int(window.get("pid") or 0)
++        window_id = int(window.get("window_id") or window.get("windowId") or 0)
++        driver_mode = "vision" if mode == "vision" else ("ax" if mode == "ax" else "som")
++        # cua-driver v0.0.13 controls get_window_state's response mode through
++        # persistent config rather than a per-call argument.
++        self._session.call_tool("set_config", {"key": "capture_mode", "value": driver_mode})
++        out = self._session.call_tool("get_window_state", {"pid": pid, "window_id": window_id})
+         data = out["data"] if isinstance(out["data"], dict) else {}
+-        width = int(data.get("width", 0))
+-        height = int(data.get("height", 0))
+-        elements_raw = data.get("elements", []) or []
+-        elements = [_parse_element(e) for e in elements_raw if isinstance(e, dict)]
++
++        width = int(data.get("screenshot_width") or data.get("width") or _bounds_size(window)[0])
++        height = int(data.get("screenshot_height") or data.get("height") or _bounds_size(window)[1])
++        elements = _parse_tree_markdown(
++            str(data.get("tree_markdown") or ""),
++            app=str(data.get("name") or window.get("app_name") or app or ""),
++            pid=pid,
++            window_id=window_id,
++        )
+ 
+         png_b64: Optional[str] = None
+         png_bytes_len = 0
+@@ -279,14 +296,16 @@ class CuaDriverBackend(ComputerUseBackend):
+             except Exception:
+                 png_bytes_len = len(png_b64) * 3 // 4
+ 
++        self._last_pid = pid
++        self._last_window_id = window_id
+         return CaptureResult(
+             mode=mode,
+             width=width,
+             height=height,
+             png_b64=png_b64,
+             elements=elements,
+-            app=str(data.get("app", "") or ""),
+-            window_title=str(data.get("window_title", "") or ""),
++            app=str(data.get("name") or window.get("app_name") or app or ""),
++            window_title=str(window.get("title") or data.get("window_title") or ""),
+             png_bytes_len=png_bytes_len,
+         )
+ 
+@@ -301,18 +320,25 @@ class CuaDriverBackend(ComputerUseBackend):
+         click_count: int = 1,
+         modifiers: Optional[List[str]] = None,
+     ) -> ActionResult:
+-        args: Dict[str, Any] = {"button": button, "clickCount": click_count}
++        args: Dict[str, Any] = {"pid": self._target_pid()}
+         if element is not None:
+-            args["element"] = int(element)
++            args["element_index"] = int(element)
++            args["window_id"] = self._target_window_id()
++            if button == "right":
++                args["action"] = "show_menu"
+         elif x is not None and y is not None:
+             args["x"] = int(x)
+             args["y"] = int(y)
++            if self._target_window_id(required=False):
++                args["window_id"] = self._target_window_id()
++            if click_count != 1:
++                args["count"] = int(click_count)
++            if modifiers:
++                args["modifier"] = modifiers
+         else:
+             return ActionResult(ok=False, action="click",
+                                 message="click requires element= or x/y")
+-        if modifiers:
+-            args["modifiers"] = modifiers
+-        return self._action("click", args)
++        return self._action("right_click" if button == "right" and element is None else "click", args)
+ 
+     def drag(
+         self,
+@@ -324,21 +350,19 @@ class CuaDriverBackend(ComputerUseBackend):
+         button: str = "left",
+         modifiers: Optional[List[str]] = None,
+     ) -> ActionResult:
+-        args: Dict[str, Any] = {"button": button}
+-        if from_element is not None:
+-            args["fromElement"] = int(from_element)
+-        elif from_xy is not None:
+-            args["fromX"], args["fromY"] = int(from_xy[0]), int(from_xy[1])
++        args: Dict[str, Any] = {"pid": self._target_pid(), "button": button}
++        if from_xy is not None:
++            args["from_x"], args["from_y"] = int(from_xy[0]), int(from_xy[1])
+         else:
+-            return ActionResult(ok=False, action="drag", message="drag requires a source")
+-        if to_element is not None:
+-            args["toElement"] = int(to_element)
+-        elif to_xy is not None:
+-            args["toX"], args["toY"] = int(to_xy[0]), int(to_xy[1])
++            return ActionResult(ok=False, action="drag", message="drag requires pixel coordinates")
++        if to_xy is not None:
++            args["to_x"], args["to_y"] = int(to_xy[0]), int(to_xy[1])
+         else:
+-            return ActionResult(ok=False, action="drag", message="drag requires a destination")
++            return ActionResult(ok=False, action="drag", message="drag requires pixel coordinates")
++        if self._target_window_id(required=False):
++            args["window_id"] = self._target_window_id()
+         if modifiers:
+-            args["modifiers"] = modifiers
++            args["modifier"] = modifiers
+         return self._action("drag", args)
+ 
+     def scroll(
+@@ -351,35 +375,85 @@ class CuaDriverBackend(ComputerUseBackend):
+         y: Optional[int] = None,
+         modifiers: Optional[List[str]] = None,
+     ) -> ActionResult:
+-        args: Dict[str, Any] = {"direction": direction, "amount": int(amount)}
++        args: Dict[str, Any] = {"pid": self._target_pid(), "direction": direction, "amount": int(amount)}
+         if element is not None:
+-            args["element"] = int(element)
+-        elif x is not None and y is not None:
+-            args["x"] = int(x)
+-            args["y"] = int(y)
++            args["element_index"] = int(element)
++            args["window_id"] = self._target_window_id()
+         if modifiers:
+             args["modifiers"] = modifiers
+         return self._action("scroll", args)
+ 
+     # ── Keyboard ───────────────────────────────────────────────────
+     def type_text(self, text: str) -> ActionResult:
+-        return self._action("type", {"text": text})
++        return self._action("type_text", {"pid": self._target_pid(), "text": text})
+ 
+     def key(self, keys: str) -> ActionResult:
+-        return self._action("key", {"keys": keys})
++        parts = [p for p in re.split(r"[+\s]+", keys.lower()) if p]
++        if len(parts) > 1:
++            return self._action("hotkey", {"pid": self._target_pid(), "keys": parts})
++        return self._action("press_key", {"pid": self._target_pid(), "key": parts[0] if parts else keys})
+ 
+     # ── Introspection ──────────────────────────────────────────────
+     def list_apps(self) -> List[Dict[str, Any]]:
+-        out = self._session.call_tool("listApps", {})
++        out = self._session.call_tool("list_apps", {})
+         data = out["data"] if isinstance(out["data"], (list, dict)) else []
+         if isinstance(data, dict):
+             data = data.get("apps", [])
+         return list(data or [])
+ 
+     def focus_app(self, app: str, raise_window: bool = False) -> ActionResult:
+-        return self._action("focusApp", {"app": app, "raise": bool(raise_window)})
++        out = self._session.call_tool("launch_app", {"bundle_id": app} if "." in app else {"name": app})
++        ok = not out["isError"]
++        data = out["data"] if isinstance(out["data"], dict) else {}
++        if data.get("pid"):
++            self._last_pid = int(data["pid"])
++        windows = data.get("windows") if isinstance(data, dict) else None
++        if windows:
++            self._last_window_id = int(windows[0].get("window_id") or windows[0].get("windowId") or 0)
++        return ActionResult(ok=ok, action="focus_app", message=str(data.get("message", "")), meta=data)
+ 
+     # ── Internal ───────────────────────────────────────────────────
++    def _target_pid(self) -> int:
++        pid = getattr(self, "_last_pid", None)
++        if not pid:
++            window = self._resolve_window(None)
++            if window:
++                pid = int(window.get("pid") or 0)
++                self._last_pid = pid
++                self._last_window_id = int(window.get("window_id") or window.get("windowId") or 0)
++        if not pid:
++            raise RuntimeError("computer_use action requires a prior capture/focus target")
++        return int(pid)
++
++    def _target_window_id(self, required: bool = True) -> int:
++        window_id = getattr(self, "_last_window_id", None)
++        if not window_id and required:
++            raise RuntimeError("element-indexed action requires a prior capture")
++        return int(window_id or 0)
++
++    def _resolve_window(self, app: Optional[str]) -> Optional[Dict[str, Any]]:
++        out = self._session.call_tool("list_windows", {})
++        data = out["data"] if isinstance(out["data"], (list, dict)) else []
++        windows = data.get("windows", []) if isinstance(data, dict) else data
++        windows = [w for w in windows if isinstance(w, dict) and int(w.get("pid") or 0)]
++        if app:
++            needle = app.lower()
++            app_matches = [w for w in windows if needle in str(w.get("app_name", "")).lower()
++                           or needle in str(w.get("bundle_id", "")).lower()]
++            title_matches = [w for w in windows if needle in str(w.get("title", "")).lower()]
++            windows = app_matches or title_matches
++        if not windows:
++            return None
++        windows.sort(key=lambda w: (
++            not bool(w.get("title")),
++            _bounds_size(w)[1] < 80,
++            not bool(w.get("on_current_space")),
++            not bool(w.get("is_on_screen")),
++            int(w.get("layer") or 0),
++            int(w.get("z_index") or 10**9),
++        ))
++        return windows[0]
++
+     def _action(self, name: str, args: Dict[str, Any]) -> ActionResult:
+         try:
+             out = self._session.call_tool(name, args)
+@@ -397,6 +471,34 @@ class CuaDriverBackend(ComputerUseBackend):
+                             meta=data if isinstance(data, dict) else {})
+ 
+ 
++def _bounds_size(d: Dict[str, Any]) -> Tuple[int, int]:
++    bounds = d.get("bounds") or {}
++    if isinstance(bounds, dict):
++        return int(bounds.get("width", bounds.get("w", 0)) or 0), int(bounds.get("height", bounds.get("h", 0)) or 0)
++    if isinstance(bounds, (list, tuple)) and len(bounds) == 4:
++        return int(bounds[2]), int(bounds[3])
++    return 0, 0
++
++
++def _parse_tree_markdown(markdown: str, *, app: str = "", pid: int = 0, window_id: int = 0) -> List[UIElement]:
++    elements: List[UIElement] = []
++    pattern = re.compile(r"\[(\d+)\]\s+(AX\w+)(?:\s+\"([^\"]*)\")?")
++    for match in pattern.finditer(markdown):
++        index = int(match.group(1))
++        if index <= 0:
++            continue
++        elements.append(UIElement(
++            index=index,
++            role=match.group(2),
++            label=match.group(3) or "",
++            bounds=(0, 0, 0, 0),
++            app=app,
++            pid=pid,
++            window_id=window_id,
++        ))
++    return elements
++
++
+ def _parse_element(d: Dict[str, Any]) -> UIElement:
+     bounds = d.get("bounds") or (0, 0, 0, 0)
+     if isinstance(bounds, dict):

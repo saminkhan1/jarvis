@@ -96,6 +96,23 @@ final class ReadinessGatingTests: XCTestCase {
         )
     }
 
+    func testHermesComputerUseToolsListParsingRequiresEnabledComputerUseRow() {
+        let disabledOutput = """
+        Built-in toolsets (cli):
+          ✓ enabled  web  🔍 Web Search & Scraping
+          ✗ disabled  computer_use  🖱️  Computer Use (macOS)
+        """
+        XCTAssertFalse(CuaDriverService.hermesComputerUseEnabled(in: disabledOutput))
+        XCTAssertFalse(CuaDriverService.hermesComputerUseEnabled(in: "computer_use not enabled"))
+
+        let enabledOutput = """
+        Built-in toolsets (cli):
+          ✓ enabled  web  🔍 Web Search & Scraping
+          ✓ enabled  computer_use  🖱️  Computer Use (macOS)
+        """
+        XCTAssertTrue(CuaDriverService.hermesComputerUseEnabled(in: enabledOutput))
+    }
+
     func testOnboardingVisibilityTracksCapabilitySpecificReadiness() {
         XCTAssertTrue(
             AURAStore.shouldShowCuaOnboarding(

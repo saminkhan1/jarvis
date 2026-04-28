@@ -9,7 +9,7 @@ This report reads the current MVP execution report as the engineering boundary:
 
 - AURA is the native macOS ambient shell.
 - Hermes is the agent runtime, planner, delegator, memory/tool/MCP owner, and final synthesizer.
-- CUA Driver is the approval-gated host-control lane exposed through `script/aura-cua-mcp`.
+- CUA Driver is the host-control lane exposed through Hermes-owned `computer_use`.
 - AURA must not become a custom agent loop, browser framework, task database, or hardcoded demo app.
 
 The optimal design is not "add every connector as a button." The optimal design
@@ -32,7 +32,6 @@ Repo-local:
 - `Sources/AURA/Views/CursorSurfaceView.swift`
 - `Sources/AURA/Views/MissionRunnerView.swift`
 - `script/aura-hermes`
-- `script/aura-cua-mcp`
 - `config/hermes-default.yaml`
 - `script/e2e_test.sh`
 
@@ -148,8 +147,8 @@ Ready now:
 - Project-local Hermes wrapper through `script/aura-hermes`.
 - OpenAI Codex auth is logged in.
 - CUA Driver daemon is running.
-- `cua-driver` MCP server is enabled through `script/aura-cua-mcp`.
-- CUA raw MCP surface is discoverable through the daemon proxy. Hermes config
+- Hermes-owned `computer_use` is enabled for host control.
+- CUA capability is discoverable through Hermes `computer_use`. Hermes config
   currently exposes the safe read-only include list to AURA-launched missions.
 - Core Hermes toolsets reported available: `browser`, `clarify`,
   `code_execution`, `cronjob`, `terminal`, `delegation`, `feishu_doc`,
@@ -181,7 +180,7 @@ Current AURA mission launch:
 
 - AURA invokes `./script/aura-hermes chat -Q --source aura -q <mission envelope>`.
 - AURA does not pass `-t` toolset overrides.
-- AURA does not pass `AURA_AUTOMATION_POLICY` or `AURA_CUA_ALLOW_ACTIONS`.
+- AURA does not pass AURA-owned CUA policy env gates.
 - Hermes config decides MCP/tool exposure and approval behavior.
 
 This keeps AURA lean and avoids a duplicate planner. Missing providers should
@@ -367,7 +366,7 @@ show a Readiness Center derived from bounded commands and local passive checks:
 
 Rules:
 
-- Use `script/aura-hermes` and `script/aura-cua-mcp`; never global Hermes.
+- Use `script/aura-hermes`; never global Hermes.
 - Do not parse secrets or display secret values.
 - Do not infer tool permissions from AURA state.
 - Treat Hermes config as authoritative for which tools exist and what approvals
@@ -404,9 +403,8 @@ Examples:
 Mission launch rules:
 
 - Do not pass `-t` from AURA.
-- Do not pass `AURA_AUTOMATION_POLICY` or `AURA_CUA_ALLOW_ACTIONS`.
-- Include only goal, context snapshot, current Hermes config summary, CUA
-  readiness, and AURA safety copy in the mission envelope.
+- Do not pass AURA-owned CUA policy env gates.
+- Include only goal, context snapshot, current Hermes config summary, CUA readiness, and AURA safety copy in the mission envelope.
 - If Hermes returns `NEEDS_APPROVAL`, AURA presents the approval and resumes the
   same Hermes session without changing toolsets.
 
@@ -622,7 +620,7 @@ Tasks:
 Acceptance:
 
 - AURA launches Hermes without `-t`.
-- AURA does not pass `AURA_AUTOMATION_POLICY` or `AURA_CUA_ALLOW_ACTIONS`.
+- AURA does not pass AURA-owned CUA policy env gates.
 - Hermes config remains the only source of tool exposure.
 
 ### Phase 3: WorkerRun Projection And Ambient Worker UI

@@ -58,12 +58,12 @@ Default delegation posture:
 
 ## CUA Usage
 
-CUA is not the agent brain. It is the host computer-use lane registered with Hermes through AURA's daemon-backed MCP proxy.
+CUA is not the agent brain. It is the host computer-use lane exposed through Hermes-owned `computer_use`.
 
-- Ordinary AURA missions launch with the `cua-driver` Hermes toolset enabled, but the command is `script/aura-cua-mcp`, not raw `cua-driver mcp`.
-- `script/aura-cua-mcp` forwards tool calls to the CuaDriver.app daemon socket so macOS TCC stays attached to the already-approved `com.trycua.driver` bundle.
-- MVP sessions expose the configured CUA MCP tool surface through Hermes.
-- Treat CUA setup as a hard product gate: AURA's mission workflow stays locked until Cua Driver is installed, running, permissioned, and registered.
+- Ordinary AURA missions rely on project-local Hermes tool exposure; host control uses the Hermes `computer_use` toolset.
+- Hermes talks to CuaDriver.app through its computer-use backend, keeping tool semantics out of AURA.
+- MVP sessions expose host-control capability through Hermes, not an AURA-owned MCP proxy.
+- Treat CUA setup as a host-control readiness gate: Cua Driver should be installed, running, permissioned, and Hermes `computer_use` enabled.
 - Register CUA Driver with Hermes through MCP rather than writing custom Swift desktop automation first.
 - CUA Driver requires macOS Accessibility and Screen Recording permissions.
 - The safe action loop is always: snapshot, act, re-snapshot, verify.

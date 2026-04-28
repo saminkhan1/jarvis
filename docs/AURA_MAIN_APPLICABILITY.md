@@ -5,9 +5,9 @@ This note maps `AURA_MVP_FINAL_EXECUTION_REPORT.md` to the current `main` branch
 ## Current Alignment
 
 - `script/aura-hermes` already enforces the project-local Hermes boundary under `.aura/` and scopes `HOME` plus `HERMES_HOME` into the repo runtime.
-- `script/aura-cua-mcp` already keeps CUA behind the daemon-backed MCP proxy and filters read-only versus action tools by AURA policy.
+- Host control now belongs to Hermes-owned `computer_use`; AURA keeps only passive CuaDriver readiness checks.
 - `AURAStore` already launches one Hermes parent mission with `--yolo`, passes a mission envelope, captures the `session_id`, and supports cancellation.
-- `script/e2e_test.sh` already verifies Hermes wrapper isolation, CUA readiness, MCP registration, real YOLO mission flow, audit correlation, and app launch.
+- `script/e2e_test.sh` verifies Hermes wrapper isolation, CUA readiness, Hermes `computer_use` exposure, real YOLO mission flow, audit correlation, and app launch.
 - The repo correctly treats voice, standalone runtime install, signing/notarization, and polished beta onboarding as future work rather than current baseline.
 
 ## Apply First

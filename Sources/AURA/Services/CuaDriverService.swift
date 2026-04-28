@@ -21,13 +21,13 @@ final class CuaDriverService {
         var daemonStatus = "Not installed"
         var accessibilityGranted: Bool?
         var screenRecordingGranted: Bool?
-        var isMCPRegistered = false
+        var isHermesComputerUseEnabled = false
 
         if let preferredExecutablePath {
             let command = shellQuoted(preferredExecutablePath)
             async let versionResult = runShell("\(command) --version", traceID: traceID, telemetryEnabled: telemetryEnabled)
             async let daemonResult = runShell("\(command) status", traceID: traceID, telemetryEnabled: telemetryEnabled)
-            async let mcpResult = testProjectHermesCuaMCP(traceID: traceID, telemetryEnabled: telemetryEnabled)
+            async let hermesToolResult = testProjectHermesComputerUse(traceID: traceID, telemetryEnabled: telemetryEnabled)
 
             let resolvedVersion = await versionResult
             let resolvedDaemon = await daemonResult
@@ -40,7 +40,7 @@ final class CuaDriverService {
                 accessibilityGranted = Self.permissionValue(named: "accessibility", in: resolvedPermissions.combinedOutput)
                 screenRecordingGranted = Self.permissionValue(named: "screen recording", in: resolvedPermissions.combinedOutput)
             }
-            isMCPRegistered = await mcpResult
+            isHermesComputerUseEnabled = await hermesToolResult
         }
 
         let status = CuaDriverStatus(
@@ -49,7 +49,7 @@ final class CuaDriverService {
             daemonStatus: daemonStatus,
             accessibilityGranted: accessibilityGranted,
             screenRecordingGranted: screenRecordingGranted,
-            isMCPRegistered: isMCPRegistered,
+            isHermesComputerUseEnabled: isHermesComputerUseEnabled,
             lastCheckedAt: Date()
         )
 
@@ -63,7 +63,7 @@ final class CuaDriverService {
                     .bool("installed", status.isInstalled),
                     .bool("daemon_running", status.daemonRunning),
                     .bool("permissions_ready", status.permissionsReady),
-                    .bool("mcp_registered", status.isMCPRegistered),
+                    .bool("computer_use_enabled", status.isHermesComputerUseEnabled),
                     .int("issue_count", status.issues.count)
                 ]
             )
@@ -272,18 +272,9 @@ final class CuaDriverService {
         return currentStatus
     }
 
-    func recommendedMCPCommandPath(for status: CuaDriverStatus) -> String? {
+    func recommendedCuaDriverCommandPath(for status: CuaDriverStatus) -> String? {
         if FileManager.default.isExecutableFile(atPath: appBinary) {
             return appBinary
-        }
-
-        return nil
-    }
-
-    func recommendedMCPProxyCommandPath() -> String? {
-        let proxyPath = AURAPaths.projectRoot.appendingPathComponent("script/aura-cua-mcp").path
-        if FileManager.default.isExecutableFile(atPath: proxyPath) {
-            return proxyPath
         }
 
         return nil
@@ -294,7 +285,7 @@ final class CuaDriverService {
             return await runShell("open -n -g \(shellQuoted(appBundle)) --args serve", traceID: traceID)
         }
 
-        guard let commandPath = recommendedMCPCommandPath(for: status) else {
+        guard let commandPath = recommendedCuaDriverCommandPath(for: status) else {
             let now = Date()
             return ShellCommandResult(
                 command: "start cua-driver daemon",
@@ -315,7 +306,7 @@ final class CuaDriverService {
     }
 
     private func requestPermissions(for status: CuaDriverStatus, prompt: Bool, traceID: String) async -> ShellCommandResult {
-        guard let commandPath = recommendedMCPCommandPath(for: status) else {
+        guard let commandPath = recommendedCuaDriverCommandPath(for: status) else {
             let now = Date()
             return ShellCommandResult(
                 command: "cua-driver call check_permissions",
@@ -548,7 +539,7 @@ final class CuaDriverService {
         "'\(value.replacingOccurrences(of: "'", with: "'\\''"))'"
     }
 
-    private func testProjectHermesCuaMCP(traceID: String, telemetryEnabled: Bool) async -> Bool {
+    private func testProjectHermesComputerUse(traceID: String, telemetryEnabled: Bool) async -> Bool {
         let wrapperPath = AURAPaths.projectRoot
             .appendingPathComponent("script/aura-hermes")
             .path
@@ -557,15 +548,27 @@ final class CuaDriverService {
         }
 
         let result = await runShell(
-            "\(shellQuoted(wrapperPath)) mcp test cua-driver",
+            "\(shellQuoted(wrapperPath)) tools list --platform cli",
             timeout: 20,
             traceID: traceID,
             telemetryEnabled: telemetryEnabled
         )
         let output = result.combinedOutput.lowercased()
-        return result.succeeded
-            && output.contains("connected")
-            && output.contains("tools discovered")
+        return result.succeeded && Self.hermesComputerUseEnabled(in: output)
+    }
+
+    static func hermesComputerUseEnabled(in toolsListOutput: String) -> Bool {
+        toolsListOutput
+            .lowercased()
+            .components(separatedBy: .newlines)
+            .contains { line in
+                let fields = line.split { $0 == " " || $0 == "\t" }.map(String.init)
+                guard let computerUseIndex = fields.firstIndex(of: "computer_use"), computerUseIndex > 0 else {
+                    return false
+                }
+                return fields[..<computerUseIndex].contains("enabled")
+                    && !fields[..<computerUseIndex].contains("disabled")
+            }
     }
 
     private static func permissionValue(named name: String, in output: String) -> Bool? {

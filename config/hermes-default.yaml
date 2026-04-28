@@ -8,7 +8,7 @@ model:
   # Validate the configured provider/model with:
   #   ./script/aura-hermes doctor
   #   ./script/aura-hermes chat -Q --yolo --source aura-setup -q "Reply exactly: AURA OK"
-  default: gpt-5.4
+  default: gpt-5.5
   provider: openai-codex
   base_url: https://openrouter.ai/api/v1
 
@@ -34,7 +34,7 @@ approvals:
   cron_mode: deny
 
 platform_toolsets:
-  # Conservative default: read/research/context/planning tools only.
+  # Conservative default plus Hermes-owned computer-use for CUA missions.
   cli:
     - web
     - skills
@@ -43,6 +43,7 @@ platform_toolsets:
     - session_search
     - clarify
     - delegation
+    - computer_use
 
 display:
   streaming: true
@@ -83,11 +84,3 @@ tts:
   provider: edge
   edge:
     voice: en-US-AriaNeural
-
-mcp_servers:
-  cua-driver:
-    command: "${AURA_PROJECT_ROOT}/script/aura-cua-mcp"
-    tools:
-      prompts: false
-      resources: false
-    enabled: true

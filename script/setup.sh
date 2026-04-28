@@ -7,7 +7,7 @@ AURA_HOME="$AURA_DIR/home"
 HERMES_HOME="$AURA_DIR/hermes-home"
 HERMES_AGENT_DIR="$AURA_DIR/hermes-agent"
 HERMES_REPO="${AURA_HERMES_REPO:-https://github.com/NousResearch/hermes-agent.git}"
-HERMES_REF="${AURA_HERMES_REF:-edc78e258c394be5804ea3c7a844fd965aaf121a}"
+HERMES_REF="${AURA_HERMES_REF:-b07791db0508f92625dfc9e75f20c331cc7bb528}"
 MIN_MACOS_MAJOR=14
 CHECK_ONLY=0
 WARNINGS=0
@@ -191,6 +191,42 @@ ensure_hermes_checkout() {
   ok "Cloned Hermes checkout at $HERMES_REF"
 }
 
+apply_hermes_local_patches() {
+  section "Project-local Hermes compatibility patches"
+
+  local patch_file="$ROOT_DIR/patches/hermes-agent/cua-driver-compat.patch"
+  if [[ ! -f "$patch_file" ]]; then
+    fail "Missing Hermes compatibility patch: $patch_file"
+    return
+  fi
+
+  if [[ ! -d "$HERMES_AGENT_DIR/.git" ]]; then
+    warn "Hermes checkout is missing; cannot apply compatibility patches yet"
+    return
+  fi
+
+  if git -C "$HERMES_AGENT_DIR" apply --reverse --check "$patch_file" >/dev/null 2>&1; then
+    ok "Hermes CuaDriver compatibility patch is applied"
+    return
+  fi
+
+  if [[ "$CHECK_ONLY" == "1" ]]; then
+    if git -C "$HERMES_AGENT_DIR" apply --check "$patch_file" >/dev/null 2>&1; then
+      warn "Hermes CuaDriver compatibility patch is not applied; setup will apply it"
+    else
+      warn "Hermes CuaDriver compatibility patch cannot be applied cleanly"
+    fi
+    return
+  fi
+
+  if git -C "$HERMES_AGENT_DIR" apply --check "$patch_file" >/dev/null 2>&1; then
+    git -C "$HERMES_AGENT_DIR" apply "$patch_file"
+    ok "Applied Hermes CuaDriver compatibility patch"
+  else
+    fail "Hermes CuaDriver compatibility patch cannot be applied cleanly"
+  fi
+}
+
 ensure_hermes_venv() {
   section "Project-local Hermes Python environment"
 
@@ -271,63 +307,48 @@ seed_templates() {
   fi
 }
 
-migrate_cua_mcp_config() {
-  section "CUA MCP Hermes config"
+configure_hermes_computer_use_config() {
+  section "Hermes computer-use config"
 
   local config_target="$HERMES_HOME/config.yaml"
   local hermes_python="$HERMES_AGENT_DIR/venv/bin/python3"
   [[ -x "$hermes_python" ]] || hermes_python="$HERMES_AGENT_DIR/venv/bin/python"
 
   if [[ ! -f "$config_target" ]]; then
-    warn "$config_target is missing; setup will create it before migration"
+    warn "$config_target is missing; setup will create it before configuring computer_use"
     return
   fi
 
   if [[ "$CHECK_ONLY" == "1" ]]; then
-    if grep -q "AURA_AUTOMATION_POLICY\\|AURA_CUA_ALLOW_ACTIONS" "$config_target"; then
-      warn "CUA MCP config still uses old AURA env policy gates; run ./script/setup.sh to migrate to Hermes tools.include"
-      return
-    fi
-
-    if grep -q "script/aura-host-mcp\|script/aura-host-guard-hook" "$config_target"; then
-      warn "Hermes config still references removed AURA host-runner paths; run ./script/setup.sh to remove stale runtime entries"
-      return
-    fi
-
-    if grep -q "script/aura-cua-mcp" "$config_target"; then
-      ok "CUA MCP is configured in Hermes"
+    if "$hermes_python" - "$config_target" <<'PY' >/dev/null 2>&1
+import sys, yaml
+path = sys.argv[1]
+with open(path, "r", encoding="utf-8") as fh:
+    config = yaml.safe_load(fh) or {}
+platform_toolsets = config.get("platform_toolsets") or {}
+cli = platform_toolsets.get("cli") or []
+raise SystemExit(0 if "computer_use" in cli else 1)
+PY
+    then
+      ok "Hermes computer_use toolset is enabled for AURA CLI missions"
     else
-      warn "CUA MCP should be configured with mcp_servers.cua-driver.command"
+      warn "Hermes config should enable platform_toolsets.cli: computer_use"
     fi
     return
   fi
 
   if [[ ! -x "$hermes_python" ]]; then
-    warn "Hermes Python is missing; skipping CUA MCP config migration"
+    warn "Hermes Python is missing; skipping Hermes computer_use config update"
     return
   fi
 
-  local migration_output
-  if migration_output="$("$hermes_python" - "$config_target" <<'PY'
+  local config_output
+  if config_output="$("$hermes_python" - "$config_target" <<'PY'
 import sys
 
 import yaml
 
 path = sys.argv[1]
-read_tools = [
-    "check_permissions",
-    "get_accessibility_tree",
-    "get_agent_cursor_state",
-    "get_config",
-    "get_cursor_position",
-    "get_recording_state",
-    "get_screen_size",
-    "get_window_state",
-    "list_apps",
-    "list_windows",
-    "screenshot",
-    "zoom",
-]
 
 with open(path, "r", encoding="utf-8") as fh:
     config = yaml.safe_load(fh) or {}
@@ -335,104 +356,40 @@ with open(path, "r", encoding="utf-8") as fh:
 if not isinstance(config, dict):
     raise SystemExit("config root is not a mapping")
 
-servers = config.setdefault("mcp_servers", {})
-if not isinstance(servers, dict):
-    servers = {}
-    config["mcp_servers"] = servers
-
-server = servers.setdefault("cua-driver", {})
-if not isinstance(server, dict):
-    server = {}
-    servers["cua-driver"] = server
-
 changed = False
 
-if servers.pop("aura-host-runner", None) is not None:
+platform_toolsets = config.setdefault("platform_toolsets", {})
+if not isinstance(platform_toolsets, dict):
+    platform_toolsets = {}
+    config["platform_toolsets"] = platform_toolsets
     changed = True
 
-command = "${AURA_PROJECT_ROOT}/script/aura-cua-mcp"
-if server.get("command") != command:
-    server["command"] = command
+cli = platform_toolsets.get("cli")
+if not isinstance(cli, list):
+    cli = []
+    platform_toolsets["cli"] = cli
     changed = True
 
-env = server.get("env")
-if isinstance(env, dict):
-    for key in ("AURA_AUTOMATION_POLICY", "AURA_CUA_ALLOW_ACTIONS"):
-        if key in env:
-            env.pop(key, None)
-            changed = True
-    if not env:
-        server.pop("env", None)
-        changed = True
-elif env is not None:
-    server.pop("env", None)
-    changed = True
-
-tools = server.get("tools")
-if not isinstance(tools, dict):
-    tools = {}
-    server["tools"] = tools
-    changed = True
-
-include = tools.get("include")
-if isinstance(include, list) and set(include) == set(read_tools):
-    tools.pop("include", None)
-    changed = True
-
-if tools.get("exclude") == []:
-    tools.pop("exclude", None)
-    changed = True
-
-for key in ("prompts", "resources"):
-    if tools.get(key) is not False:
-        tools[key] = False
-        changed = True
-
-hooks = config.get("hooks")
-if isinstance(hooks, dict):
-    pre_tool_call = hooks.get("pre_tool_call")
-    if isinstance(pre_tool_call, list):
-        filtered = []
-        removed = False
-        for hook in pre_tool_call:
-            if isinstance(hook, dict) and hook.get("command") == "./script/aura-host-guard-hook":
-                removed = True
-                continue
-            filtered.append(hook)
-        if removed:
-            changed = True
-            if filtered:
-                hooks["pre_tool_call"] = filtered
-            else:
-                hooks.pop("pre_tool_call", None)
-    elif pre_tool_call is not None:
-        hooks.pop("pre_tool_call", None)
-        changed = True
-
-    if not hooks:
-        config.pop("hooks", None)
-        changed = True
-
-if server.get("enabled") is not True:
-    server["enabled"] = True
+if "computer_use" not in cli:
+    cli.append("computer_use")
     changed = True
 
 if changed:
     with open(path, "w", encoding="utf-8") as fh:
         yaml.safe_dump(config, fh, sort_keys=False, allow_unicode=True)
-    print("migrated")
+    print("updated")
 else:
     print("unchanged")
 PY
   )"; then
-    if [[ "$migration_output" == "migrated" ]]; then
-      ok "Migrated CUA MCP exposure into Hermes tools.include"
+    if [[ "$config_output" == "updated" ]]; then
+      ok "Enabled Hermes computer_use config"
     else
-      ok "CUA MCP exposure already lives in Hermes config"
+      ok "Hermes computer_use config already present"
     fi
   else
-    warn "Could not migrate CUA MCP config."
-    printf "%s\n" "$migration_output" >&2
+    warn "Could not configure Hermes computer_use."
+    printf "%s\n" "$config_output" >&2
   fi
 }
 
@@ -567,6 +524,42 @@ check_wrapper() {
   fi
 }
 
+check_hermes_computer_use() {
+  section "Hermes computer-use support"
+
+  if [[ ! -d "$HERMES_AGENT_DIR" ]]; then
+    warn "Hermes checkout is missing; setup will install a build with Hermes-owned computer-use support"
+    return
+  fi
+
+  local missing=0
+  for path in \
+    "$HERMES_AGENT_DIR/tools/computer_use/tool.py" \
+    "$HERMES_AGENT_DIR/tools/computer_use/cua_backend.py" \
+    "$HERMES_AGENT_DIR/tools/computer_use_tool.py"; do
+    if [[ ! -f "$path" ]]; then
+      warn "Missing Hermes computer-use file: ${path#$HERMES_AGENT_DIR/}"
+      missing=1
+    fi
+  done
+
+  if [[ -f "$HERMES_AGENT_DIR/toolsets.py" ]]; then
+    if ! grep -q '"computer_use"' "$HERMES_AGENT_DIR/toolsets.py"; then
+      warn "Hermes toolsets.py does not expose the computer_use toolset"
+      missing=1
+    fi
+  else
+    warn "Missing Hermes toolsets.py; cannot verify computer_use toolset exposure"
+    missing=1
+  fi
+
+  if (( missing == 0 )); then
+    ok "Hermes checkout includes computer_use tool and cua-driver backend"
+  elif [[ "$CHECK_ONLY" != "1" ]]; then
+    fail "Project-local Hermes checkout does not include required computer-use support."
+  fi
+}
+
 check_cua() {
   section "CUA Driver passive readiness"
 
@@ -648,11 +641,13 @@ main() {
   check_host
   ensure_directories
   ensure_hermes_checkout
+  apply_hermes_local_patches
   ensure_hermes_venv
   seed_templates
-  migrate_cua_mcp_config
+  configure_hermes_computer_use_config
   migrate_hermes_voice_config
   check_wrapper
+  check_hermes_computer_use
   check_cua
   print_next_steps
 

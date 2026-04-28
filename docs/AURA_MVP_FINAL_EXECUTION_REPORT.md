@@ -11,7 +11,7 @@ It is intentionally grounded in the current repo contract:
 
 - AURA is the native macOS ambient shell.
 - Hermes is the agent runtime, planner, delegator, memory/tool/MCP owner, and final synthesizer.
-- CUA Driver is the approval-gated host-control lane exposed to Hermes through `script/aura-cua-mcp`.
+- CUA Driver is the host-control lane exposed to Hermes through Hermes-owned `computer_use`.
 - AURA must not become a custom agent runtime, a browser automation framework, a task database, or a hardcoded demo app.
 
 ---
@@ -60,7 +60,7 @@ Correct framing:
 
 ### 0.5 Do not hardcode CUA tool schemas in AURA
 
-`script/aura-cua-mcp` dynamically lists tools from the running CUA Driver daemon and filters them by AURA policy. The report must not freeze an Anthropic-style hand-written tool schema unless the daemon actually advertises that schema.
+Hermes-owned `computer_use` adapts to the running CUA Driver backend. AURA must not freeze or proxy CUA tool schemas in Swift or repo-local scripts.
 
 Correct implementation:
 
@@ -119,8 +119,8 @@ Execution gates must be repo-local and measurable.
 | Shortcut | `⌃⌥⌘A` opens AURA | Keep tap-to-open; later add hold-to-talk |
 | Runtime bridge | `script/aura-hermes` invokes project-local Hermes under `.aura/` | Keep as hard boundary |
 | Hermes home | `HOME` and `HERMES_HOME` are scoped into `.aura/` | Keep |
-| CUA integration | `script/aura-cua-mcp` proxies Hermes MCP calls to CuaDriver.app daemon | Keep |
-| CUA gate | AURA locks mission workflow until CUA install, daemon, permissions, and MCP registration are ready | Keep for host-control MVP |
+| CUA integration | Hermes `computer_use` talks to CuaDriver.app | Keep in Hermes; remove AURA proxy |
+| CUA gate | AURA shows host-control readiness for CUA install, daemon, permissions, and Hermes `computer_use` | Keep host-control-specific |
 | Policies | Read Only, Ask Per Task, Always Allow | Keep; refine external-action rules |
 | Approval loop | `NEEDS_APPROVAL:` line -> approval card -> `--resume <session_id>` | Keep |
 | Sessions | AURA reads Hermes structured sessions export | Keep |
@@ -191,9 +191,9 @@ Project-local Hermes runtime
        │
        │ MCP tool calls
        ▼
-script/aura-cua-mcp
-  ├─ daemon-backed MCP proxy
-  ├─ dynamic CUA tool discovery
+Hermes computer_use
+  ├─ CuaDriver backend
+  ├─ dynamic host-control capture/action support
   ├─ read-only tool filtering before approval
   ├─ action tool filtering after approval/policy
   └─ audit logging without screenshots/prompts
@@ -529,7 +529,7 @@ All pass on the dev machine or fail with actionable messages.
 ### Rules
 
 - Do not call raw CUA action APIs from Swift mission code.
-- Mission-time CUA goes through Hermes -> `script/aura-cua-mcp` -> CuaDriver.app daemon.
+- Mission-time CUA goes through Hermes `computer_use` -> CuaDriver.app daemon.
 - Tool discovery is dynamic.
 - Read Only exposes read-only tools only.
 - Ask Per Task requires `NEEDS_APPROVAL:` before action tools.
@@ -539,7 +539,7 @@ All pass on the dev machine or fail with actionable messages.
 
 | ID | Task | Files | Verification |
 |---|---|---|---|
-| P3.1 | Audit CUA proxy read/action filtering | `script/aura-cua-mcp` | Read Only cannot see action tools |
+| P3.1 | Audit Hermes computer-use read/action behavior | Hermes `computer_use` | Read-only smoke cannot perform action tools |
 | P3.2 | Add action-loop prompt contract | Hermes/AURA mission envelope docs | Hermes follows snapshot -> act -> re-snapshot -> verify |
 | P3.3 | Add coordinate/retina tests if action tools require coordinates | e2e or test harness | Click target accuracy is measured on Retina and non-Retina |
 | P3.4 | Add mission timeouts and cancellation hardening | `AURAStore.swift`, `HermesService.swift` | Stuck mission is cancellable and does not orphan process |

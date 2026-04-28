@@ -56,7 +56,7 @@ struct SettingsView: View {
                 LabeledContent("Daemon", value: store.cuaStatus.daemonStatus)
                 LabeledContent("Accessibility", value: permissionText(store.cuaStatus.accessibilityGranted))
                 LabeledContent("Screen Recording", value: permissionText(store.cuaStatus.screenRecordingGranted))
-                LabeledContent("Hermes MCP", value: store.cuaStatus.isMCPRegistered ? "Registered" : "Not registered")
+                LabeledContent("Hermes computer_use", value: store.cuaStatus.isHermesComputerUseEnabled ? "Enabled" : "Disabled")
 
                 Button("Refresh") {
                     Task { await store.refreshCuaStatus() }

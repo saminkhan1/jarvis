@@ -30,6 +30,15 @@ assert_contains() {
   fi
 }
 
+assert_not_contains() {
+  local haystack="$1"
+  local needle="$2"
+  local label="$3"
+  if [[ "$haystack" == *"$needle"* ]]; then
+    fail "$label unexpectedly contained '$needle'"
+  fi
+}
+
 assert_any_contains() {
   local haystack="$1"
   local label="$2"
@@ -65,7 +74,7 @@ assert_contains "$config_output" "Configuration Status" "Hermes config check"
 run_capture "$TMP_DIR/tools.txt" "$HERMES" tools list --platform cli
 tools_output="$(<"$TMP_DIR/tools.txt")"
 assert_contains "$tools_output" "Built-in toolsets (cli)" "Hermes tools list"
-assert_contains "$tools_output" "cua-driver" "Hermes tools list"
+assert_contains "$tools_output" "✓ enabled  computer_use" "Hermes tools list"
 
 section "Host context pack"
 [[ -x "$CUA_DRIVER" ]] || fail "Missing CUA Driver binary: $CUA_DRIVER"
@@ -76,10 +85,6 @@ run_capture "$TMP_DIR/cua-permissions.txt" "$CUA_DRIVER" call check_permissions 
 cua_permissions="$(<"$TMP_DIR/cua-permissions.txt")"
 assert_contains "$cua_permissions" "Accessibility: granted" "CUA permissions"
 assert_contains "$cua_permissions" "Screen Recording: granted" "CUA permissions"
-run_capture "$TMP_DIR/mcp-test.txt" "$HERMES" mcp test cua-driver
-mcp_test="$(<"$TMP_DIR/mcp-test.txt")"
-assert_contains "$mcp_test" "Connected" "CUA MCP test"
-assert_contains "$mcp_test" "Tools discovered" "CUA MCP test"
 
 section "Local artifact pack"
 assert_any_contains "$tools_output" "Local artifact toolsets" "✓ enabled  terminal" "✗ disabled  terminal"
@@ -113,7 +118,7 @@ assert_any_contains "$cron_output" "Hermes cron list" "No scheduled jobs" "ID" "
 section "External MCP pack"
 run_capture "$TMP_DIR/mcp-list.txt" "$HERMES" mcp list
 mcp_list="$(<"$TMP_DIR/mcp-list.txt")"
-assert_contains "$mcp_list" "MCP Servers" "Hermes MCP list"
-assert_contains "$mcp_list" "cua-driver" "Hermes MCP list"
+assert_any_contains "$mcp_list" "Hermes MCP list" "MCP Servers" "No MCP servers configured"
+assert_not_contains "$mcp_list" "cua-driver" "Hermes MCP list"
 
 printf "\nAURA connection matrix checks passed.\n"

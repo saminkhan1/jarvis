@@ -1089,20 +1089,20 @@ final class AURAStore: ObservableObject {
             : "Hermes chat is available. Complete CUA setup before using host control: \(issues.joined(separator: " "))"
     }
 
-    func registerCuaDriverWithHermes(traceID: String = AURATelemetry.makeTraceID(prefix: "cua-mcp")) async {
+    func enableHermesComputerUse(traceID: String = AURATelemetry.makeTraceID(prefix: "cua-computer-use")) async {
         let startedAt = Date()
-        AURATelemetry.info(.cuaMCPRegisterStart, category: .cua, traceID: traceID, audit: .governance)
+        AURATelemetry.info(.cuaComputerUseEnableStart, category: .cua, traceID: traceID, audit: .governance)
 
         if cuaStatus.lastCheckedAt == nil {
             await refreshCuaStatus(traceID: traceID)
         }
 
-        guard cuaDriverService.recommendedMCPCommandPath(for: cuaStatus) != nil else {
-            lastCommand = "register cua-driver MCP"
-            lastOutput = "Cua Driver is not installed. Install it first, then register the MCP server."
+        guard cuaDriverService.recommendedCuaDriverCommandPath(for: cuaStatus) != nil else {
+            lastCommand = "enable Hermes computer_use"
+            lastOutput = "Cua Driver is not installed. Install it first, then enable Hermes computer_use."
             lastUpdated = Date()
             AURATelemetry.warning(
-                .cuaMCPRegisterBlocked,
+                .cuaComputerUseEnableBlocked,
                 category: .cua,
                 traceID: traceID,
                 fields: [
@@ -1114,42 +1114,19 @@ final class AURAStore: ObservableObject {
             return
         }
 
-        guard let proxyPath = cuaDriverService.recommendedMCPProxyCommandPath() else {
-            lastCommand = "register cua-driver MCP"
-            lastOutput = "AURA CUA MCP proxy is missing or not executable."
-            lastUpdated = Date()
-            AURATelemetry.error(
-                .cuaMCPRegisterBlocked,
-                category: .cua,
-                traceID: traceID,
-                fields: [
-                    .string("reason", "proxy_missing"),
-                    .int("duration_ms", AURATelemetry.durationMilliseconds(from: startedAt))
-                ],
-                audit: .governance
-            )
-            return
-        }
-
-        await runHermes(arguments: [
-            "mcp",
-            "add",
-            "cua-driver",
-            "--command",
-            proxyPath
-        ], traceID: traceID) { [weak self] result in
+        await runHermes(arguments: ["tools", "enable", "computer_use"], traceID: traceID) { [weak self] result in
             if result.succeeded {
-                self?.lastOutput = "Registered Cua Driver MCP through AURA's daemon proxy. Tool exposure stays in Hermes config.\n\n\(result.combinedOutput)"
+                self?.lastOutput = "Enabled Hermes-owned computer_use for CUA missions.\n\n\(result.combinedOutput)"
             }
         }
 
         await refreshCuaStatus(traceID: traceID)
         AURATelemetry.info(
-            .cuaMCPRegisterFinish,
+            .cuaComputerUseEnableFinish,
             category: .cua,
             traceID: traceID,
             fields: [
-                .bool("registered", self.cuaStatus.isMCPRegistered),
+                .bool("computer_use_enabled", self.cuaStatus.isHermesComputerUseEnabled),
                 .int("duration_ms", AURATelemetry.durationMilliseconds(from: startedAt))
             ],
             audit: .governance

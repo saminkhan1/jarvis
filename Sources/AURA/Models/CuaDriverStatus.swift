@@ -20,7 +20,7 @@ struct CuaDriverStatus {
     var daemonStatus: String
     var accessibilityGranted: Bool?
     var screenRecordingGranted: Bool?
-    var isMCPRegistered: Bool
+    var isHermesComputerUseEnabled: Bool
     var lastCheckedAt: Date?
 
     static let unknown = CuaDriverStatus(
@@ -29,7 +29,7 @@ struct CuaDriverStatus {
         daemonStatus: "Not checked",
         accessibilityGranted: nil,
         screenRecordingGranted: nil,
-        isMCPRegistered: false,
+        isHermesComputerUseEnabled: false,
         lastCheckedAt: nil
     )
 
@@ -69,7 +69,7 @@ struct CuaDriverStatus {
     }
 
     var hostSetupReady: Bool {
-        isInstalled && daemonRunning && isMCPRegistered
+        isInstalled && daemonRunning && isHermesComputerUseEnabled
     }
 
     var readyForHostControl: Bool {
@@ -113,8 +113,8 @@ struct CuaDriverStatus {
             result.append("Start CuaDriver daemon.")
         }
 
-        if isInstalled && !isMCPRegistered {
-            result.append("Register CUA daemon proxy with Hermes MCP.")
+        if isInstalled && !isHermesComputerUseEnabled {
+            result.append("Enable Hermes computer_use for CUA missions.")
         }
 
         return result
@@ -137,8 +137,8 @@ struct CuaDriverStatus {
             return "Permissions needed"
         }
 
-        if !isMCPRegistered {
-            return "MCP not registered"
+        if !isHermesComputerUseEnabled {
+            return "Hermes computer_use disabled"
         }
 
         return "Not ready"

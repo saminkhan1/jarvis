@@ -132,12 +132,12 @@ private struct OnboardingGateView: View {
                 }
 
                 CuaSetupRow(
-                    title: "Hermes MCP",
-                    detail: "Register AURA's CUA daemon proxy with project-local Hermes.",
-                    isComplete: store.cuaStatus.isMCPRegistered,
-                    actionTitle: canRegisterMCP ? "Register" : nil
+                    title: "Hermes computer_use",
+                    detail: "Enable Hermes-owned computer-use for CUA missions.",
+                    isComplete: store.cuaStatus.isHermesComputerUseEnabled,
+                    actionTitle: canEnableHermesComputerUse ? "Enable" : nil
                 ) {
-                    Task { await store.registerCuaDriverWithHermes() }
+                    Task { await store.enableHermesComputerUse() }
                 }
             }
 
@@ -171,11 +171,11 @@ private struct OnboardingGateView: View {
         store.cuaStatus.isInstalled && store.cuaStatus.daemonRunning
     }
 
-    private var canRegisterMCP: Bool {
+    private var canEnableHermesComputerUse: Bool {
         store.cuaStatus.isInstalled
             && store.cuaStatus.daemonRunning
             && store.cuaStatus.permissionsReady
-            && !store.cuaStatus.isMCPRegistered
+            && !store.cuaStatus.isHermesComputerUseEnabled
     }
 }
 

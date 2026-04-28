@@ -124,7 +124,7 @@ if [[ ! -f "$ROOT_DIR/.env.example" ]]; then
   exit 1
 fi
 
-assert_contains "$(<"$ROOT_DIR/config/hermes-default.yaml")" 'command: "${AURA_PROJECT_ROOT}/script/aura-cua-mcp"' "Hermes config template"
+assert_contains "$(<"$ROOT_DIR/config/hermes-default.yaml")" "computer_use" "Hermes config template"
 assert_contains "$(<"$ROOT_DIR/config/hermes-default.yaml")" "mode: off" "Hermes config template"
 assert_contains "$(<"$ROOT_DIR/.env.example")" "OPENAI_API_KEY" "environment template"
 
@@ -175,22 +175,12 @@ run_capture "$TMP_DIR/cua-permissions.txt" "$CUA_DRIVER" call check_permissions 
 cua_permissions="$(<"$TMP_DIR/cua-permissions.txt")"
 assert_contains "$cua_permissions" "Accessibility: granted" "CUA Driver permissions"
 assert_contains "$cua_permissions" "Screen Recording: granted" "CUA Driver permissions"
-run_capture "$TMP_DIR/cua-mcp.txt" "$HERMES" mcp test cua-driver
-cua_mcp="$(<"$TMP_DIR/cua-mcp.txt")"
-assert_contains "$cua_mcp" "Connected" "CUA MCP test output"
-assert_contains "$cua_mcp" "Tools discovered" "CUA MCP test output"
-assert_contains "$cua_mcp" "script/aura-cua-mcp" "CUA MCP test output"
-
 run_capture "$TMP_DIR/hermes-tools.txt" "$HERMES" tools list --platform cli
 hermes_tools="$(<"$TMP_DIR/hermes-tools.txt")"
-assert_contains "$hermes_tools" "cua-driver  all tools enabled" "Hermes registered tool surface"
-assert_contains "$cua_mcp" "check_permissions" "CUA MCP test output"
-assert_contains "$cua_mcp" "screenshot" "CUA MCP test output"
-assert_contains "$cua_mcp" "type_text" "CUA MCP test output"
-assert_contains "$cua_mcp" "click" "CUA MCP test output"
-assert_contains "$(<"$ROOT_DIR/config/hermes-default.yaml")" "tools:" "Hermes CUA config template"
-assert_contains "$(<"$ROOT_DIR/config/hermes-default.yaml")" "prompts: false" "Hermes CUA config template"
-assert_not_contains "$(<"$ROOT_DIR/config/hermes-default.yaml")" "include:" "Hermes CUA config template"
+assert_contains "$hermes_tools" "✓ enabled  computer_use" "Hermes computer_use toolset"
+assert_not_contains "$hermes_tools" "cua-driver  all tools enabled" "Hermes registered tool surface"
+assert_contains "$(<"$ROOT_DIR/config/hermes-default.yaml")" "computer_use" "Hermes CUA config template"
+assert_not_contains "$(<"$ROOT_DIR/config/hermes-default.yaml")" "mcp_servers:" "Hermes CUA config template"
 
 section "Connection matrix"
 run_capture "$TMP_DIR/connection-matrix.txt" "$ROOT_DIR/script/connection_matrix.sh"
@@ -220,7 +210,6 @@ path = sys.argv[1]
 events = set()
 raw = ""
 missing_mission_id = []
-cua_timing_errors = []
 with open(path, "r", encoding="utf-8") as fh:
     for line in fh:
         raw += line
@@ -230,8 +219,6 @@ with open(path, "r", encoding="utf-8") as fh:
             events.add(event)
         if payload.get("mission_id") != "aura-e2e-mission":
             missing_mission_id.append(event or "<unknown>")
-        if event in {"cua_proxy_start", "cua_proxy_stop"} and "duration_ms" not in payload:
-            cua_timing_errors.append(event)
 
 required = {"hermes_wrapper_quiet_start", "hermes_wrapper_quiet_finish"}
 missing = required - events
@@ -240,9 +227,6 @@ if missing:
 
 if missing_mission_id:
     raise SystemExit(f"audit entries missing correlated mission_id: {missing_mission_id[:5]}")
-
-if cua_timing_errors:
-    raise SystemExit(f"CUA proxy audit entries missing duration_ms: {cua_timing_errors}")
 
 for forbidden in (
     "Reply exactly: AURA Hermes OK",
