@@ -77,7 +77,6 @@ Developer ID signed, notarized, stapled, standalone beta build yet.
 ./script/connection_matrix.sh
 ./script/aura-logs stream
 ./script/aura-logs audit
-./script/aura-monitor --open
 ```
 
 ## Local App Bundle Runtime
