@@ -30,4 +30,13 @@ final class HermesBoundaryTests: XCTestCase {
     func testExtractSessionIDReturnsNilWhenMissing() {
         XCTAssertNil(AURASessionParsing.sessionID(in: "no session marker here"))
     }
+
+    func testHermesChatArgumentsPassRawPromptWithoutAuraMissionEnvelope() {
+        let query = "what can you help me do in this repo?"
+
+        let arguments = AURAStore.hermesChatArguments(query: query)
+
+        XCTAssertEqual(arguments, ["chat", "-Q", "--yolo", "--source", "aura", "-q", query])
+        XCTAssertFalse(arguments.joined(separator: " ").contains("AURA MISSION CONTEXT"))
+    }
 }

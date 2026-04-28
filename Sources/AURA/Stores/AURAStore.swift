@@ -1263,17 +1263,11 @@ final class AURAStore: ObservableObject {
         }
 
         currentHermesSessionID = nil
-        let snapshot = missionContextSnapshot(traceID: traceID)
-
-        let envelope = Self.missionEnvelope(
-            goal: trimmedGoal,
-            contextSnapshot: snapshot,
-            cuaStatus: cuaStatus
-        )
+        contextSnapshot = missionContextSnapshot(traceID: traceID)
 
         missionStatus = .running
-        missionOutput = "Starting Hermes parent mission...\n"
-        lastCommand = "./script/aura-hermes chat -Q --yolo --source aura -q <mission context>"
+        missionOutput = "Starting Hermes...\n"
+        lastCommand = "./script/aura-hermes chat -Q --yolo --source aura -q <user prompt>"
         lastOutput = missionOutput
         lastUpdated = Date()
 
@@ -1288,8 +1282,8 @@ final class AURAStore: ObservableObject {
                 ]),
                 audit: .agent
             )
-            try launchHermes(arguments: hermesChatArguments(
-                query: envelope
+            try launchHermes(arguments: Self.hermesChatArguments(
+                query: trimmedGoal
             ), environment: Self.hermesEnvironment(
                 missionID: activeMissionID
             ), traceID: traceID)
@@ -1480,7 +1474,7 @@ final class AURAStore: ObservableObject {
         lastUpdated = Date()
     }
 
-    private func hermesChatArguments(query: String) -> [String] {
+    nonisolated static func hermesChatArguments(query: String) -> [String] {
         var arguments = ["chat", "-Q", "--yolo", "--source", "aura"]
         arguments.append(contentsOf: ["-q", query])
         return arguments
@@ -1660,27 +1654,6 @@ final class AURAStore: ObservableObject {
         activeMissionID = nil
         activeMissionStartedAt = nil
         missionOutputChunkCount = 0
-    }
-
-    private static func missionEnvelope(
-        goal: String,
-        contextSnapshot: ContextSnapshot,
-        cuaStatus: CuaDriverStatus
-    ) -> String {
-        return """
-        AURA MISSION CONTEXT
-
-        USER GOAL
-        \(goal)
-
-        CURRENT MAC CONTEXT
-        \(contextSnapshot.markdownSummary)
-
-        CUA READINESS
-        title: \(cuaStatus.title)
-        ready_for_host_control: \(cuaStatus.readyForHostControl)
-        issues: \(cuaStatus.issues.isEmpty ? "none" : cuaStatus.issues.joined(separator: " "))
-        """
     }
 
     private static func sessionID(in output: String) -> String? {
