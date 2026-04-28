@@ -133,8 +133,6 @@ final class AURAStore: ObservableObject {
         let storedInputMode = UserDefaults.standard.string(forKey: Self.inputModeKey)
         inputMode = MissionInputMode(rawValue: storedInputMode ?? "") ?? .text
         microphonePermissionStatus = voiceCaptureService.microphonePermissionStatus()
-        updateCursorIndicator()
-        syncHostControlAvailability()
         AURATelemetry.info(
             .storeInitialized,
             category: .mission,
@@ -340,6 +338,8 @@ final class AURAStore: ObservableObject {
     func runLaunchOnboarding() async {
         guard !didRunLaunchOnboarding else { return }
         didRunLaunchOnboarding = true
+
+        syncHostControlAvailability()
 
         let traceID = AURATelemetry.makeTraceID(prefix: "launch")
         let startedAt = Date()
