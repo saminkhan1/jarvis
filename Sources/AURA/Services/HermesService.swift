@@ -349,6 +349,10 @@ final class HermesService {
                 "AURA_AUDIT_LEDGER_PATH": AURAAuditLedger.shared.ledgerURL.path
             ]) { _, new in new }
     }
+
+    static func mergedEnvironmentForTesting(_ environment: [String: String], traceID: String) -> [String: String] {
+        mergedEnvironment(environment, traceID: traceID)
+    }
 }
 
 private final class LockedData {

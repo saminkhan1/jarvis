@@ -1469,7 +1469,7 @@ final class AURAStore: ObservableObject {
             let combinedOutput = commandResult.combinedOutput.trimmingCharacters(in: .whitespacesAndNewlines)
             let stdoutOutput = commandResult.output.trimmingCharacters(in: .whitespacesAndNewlines)
             let output = commandResult.succeeded && !stdoutOutput.isEmpty ? stdoutOutput : combinedOutput
-            let parsedSessionID = Self.sessionID(in: combinedOutput)
+            let parsedSessionID = AURASessionParsing.sessionID(in: combinedOutput)
             currentHermesSessionID = parsedSessionID ?? currentHermesSessionID
             if let parsedSessionID {
                 AURATelemetry.info(
@@ -1660,17 +1660,7 @@ final class AURAStore: ObservableObject {
     }
 
     private static func sessionID(in output: String) -> String? {
-        for rawLine in output.components(separatedBy: .newlines) {
-            let line = rawLine.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard line.lowercased().hasPrefix("session_id:") else { continue }
-
-            return line
-                .dropFirst("session_id:".count)
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-                .nilIfEmpty
-        }
-
-        return nil
+        AURASessionParsing.sessionID(in: output)
     }
 
     private static func decodeVoiceTranscription(from output: String) throws -> VoiceTranscriptionResponse {

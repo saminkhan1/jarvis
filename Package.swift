@@ -13,6 +13,11 @@ let package = Package(
         .executableTarget(
             name: "AURA",
             path: "Sources/AURA"
+        ),
+        .testTarget(
+            name: "AURATests",
+            dependencies: ["AURA"],
+            path: "Tests/AURATests"
         )
     ]
 )
