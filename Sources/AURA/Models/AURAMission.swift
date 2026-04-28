@@ -11,11 +11,11 @@ enum MissionStatus {
     var title: String {
         switch self {
         case .idle:
-            return "Idle"
+            return "Ready"
         case .running:
             return "Running"
         case .completed:
-            return "Done"
+            return "Complete"
         case .failed:
             return "Failed"
         case .cancelled:
@@ -27,6 +27,8 @@ enum MissionStatus {
 enum MissionInputMode: String, CaseIterable, Identifiable {
     case text
     case voice
+
+    static var allCases: [MissionInputMode] { [.text, .voice] }
 
     var id: String { rawValue }
 
@@ -42,9 +44,9 @@ enum MissionInputMode: String, CaseIterable, Identifiable {
     var summary: String {
         switch self {
         case .text:
-            return "The mission hotkey opens AURA's text composer."
+            return "The shortcut opens AURA's text composer."
         case .voice:
-            return "The mission hotkey opens AURA's in-app audio input. AURA records locally, then project-local Hermes transcribes the request."
+            return "The shortcut opens AURA's voice composer and sends the transcript to Hermes through the project-local wrapper."
         }
     }
 
@@ -60,9 +62,9 @@ enum MissionInputMode: String, CaseIterable, Identifiable {
     var actionTitle: String {
         switch self {
         case .text:
-            return "New Mission"
+            return "New Request"
         case .voice:
-            return "Start Listening"
+            return "Start Voice Request"
         }
     }
 }
@@ -78,9 +80,9 @@ enum VoiceInputState: Equatable {
     var title: String {
         switch self {
         case .idle:
-            return "Tap to listen"
+            return "Ready to listen"
         case .requestingPermission:
-            return "Checking microphone"
+            return "Waiting for permission"
         case .recording:
             return "Listening"
         case .transcribing:

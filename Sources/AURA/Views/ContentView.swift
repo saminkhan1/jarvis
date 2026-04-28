@@ -228,7 +228,7 @@ private struct DashboardHeader: View {
             VStack(alignment: .leading, spacing: 4) {
                 Text("AURA")
                     .font(.title.bold())
-                Text("Native cockpit for Hermes missions, YOLO runs, and host-lane readiness.")
+                Text("Native macOS surface for Hermes.")
                     .font(.callout)
                     .foregroundStyle(.secondary)
             }

@@ -145,9 +145,12 @@ struct CursorSurfaceView: View {
                 .accessibilityLabel("Collapse composer")
             }
 
-            if store.missionStatus == .running {
+            switch store.missionStatus {
+            case .running:
                 runningCard
-            } else {
+            case .completed, .failed, .cancelled:
+                resultCard
+            case .idle:
                 inputCard
             }
 
@@ -158,10 +161,11 @@ struct CursorSurfaceView: View {
 
                 Spacer(minLength: 0)
 
-                if store.missionStatus == .running {
+                switch store.missionStatus {
+                case .running:
                     Button("Collapse", action: closeComposer)
                         .buttonStyle(.bordered)
-                } else {
+
                     Button("Cancel") {
                         if store.canCancelVoiceInput {
                             store.cancelVoiceInput()
@@ -169,9 +173,14 @@ struct CursorSurfaceView: View {
                             store.cancelMission()
                         }
                     }
-                    .buttonStyle(.bordered)
+                    .buttonStyle(.borderedProminent)
                     .disabled(!store.canCancelMission && !store.canCancelVoiceInput)
-
+                case .completed, .failed, .cancelled:
+                    Button("Done") {
+                        store.dismissMissionResult()
+                    }
+                    .buttonStyle(.borderedProminent)
+                case .idle:
                     Button("Start") {
                         Task { await store.startMission() }
                     }
@@ -197,7 +206,7 @@ struct CursorSurfaceView: View {
         VStack(alignment: .leading, spacing: 10) {
             ZStack(alignment: .topLeading) {
                 if store.missionGoal.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    Text("Ask AURA to explain, research, fix, build, organize, or operate through Hermes...")
+                    Text("Ask Hermes to explain, research, fix, build, organize, or operate…")
                         .foregroundStyle(.secondary)
                         .padding(.horizontal, 8)
                         .padding(.vertical, 10)
@@ -218,7 +227,7 @@ struct CursorSurfaceView: View {
             }
 
             HStack {
-                Text("Command-Return starts Hermes.")
+                Text("Command-Return sends this to Hermes.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
 
@@ -325,9 +334,32 @@ struct CursorSurfaceView: View {
         )
     }
 
+    private var resultCard: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Label(resultTitle, systemImage: resultIcon)
+                .font(.headline)
+                .foregroundStyle(resultColor)
+
+            ScrollView {
+                Text(resultBody)
+                    .font(.system(.caption, design: .monospaced))
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .topLeading)
+            }
+            .frame(height: 96)
+            .foregroundStyle(.primary)
+
+            Text(resultFooter)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .padding(12)
+        .background(resultColor.opacity(0.10), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+    }
+
     private var runningCard: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Label("Hermes is running", systemImage: "arrow.triangle.2.circlepath")
+            Label("Hermes is working", systemImage: "arrow.triangle.2.circlepath")
                 .font(.headline)
                 .foregroundStyle(.blue)
 
@@ -340,7 +372,7 @@ struct CursorSurfaceView: View {
             .frame(height: 96)
             .foregroundStyle(.primary)
 
-            Text("The composer collapses while Hermes works.")
+            Text("You can keep this open, collapse it, or cancel the run.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
@@ -413,13 +445,82 @@ struct CursorSurfaceView: View {
 
         switch store.missionStatus {
         case .idle:
-            return "Ask me to inspect, explain, research, or operate."
+            return "Ask Hermes to inspect, explain, research, or operate."
         case .running:
             return hasMissionOutput ? rawMissionOutput : "Working on it."
         case .completed, .failed:
             return rawMissionOutput
         case .cancelled:
-            return "Mission cancelled."
+            return "Run cancelled."
+        }
+    }
+
+    private var resultTitle: String {
+        switch store.missionStatus {
+        case .completed:
+            return "Hermes finished"
+        case .failed:
+            return "Hermes failed"
+        case .cancelled:
+            return "Run cancelled"
+        case .idle, .running:
+            return ""
+        }
+    }
+
+    private var resultBody: String {
+        if hasMissionOutput {
+            return rawMissionOutput
+        }
+
+        switch store.missionStatus {
+        case .completed:
+            return "Hermes finished without returning output."
+        case .failed:
+            return "Hermes failed without returning output."
+        case .cancelled:
+            return "The run was cancelled before Hermes finished."
+        case .idle, .running:
+            return ""
+        }
+    }
+
+    private var resultFooter: String {
+        switch store.missionStatus {
+        case .completed:
+            return "Review the result, then click Done to return to the base state."
+        case .failed:
+            return "Review the error, then click Done to return to the base state."
+        case .cancelled:
+            return "Click Done to clear this run and continue your work."
+        case .idle, .running:
+            return ""
+        }
+    }
+
+    private var resultIcon: String {
+        switch store.missionStatus {
+        case .completed:
+            return "checkmark.circle"
+        case .failed:
+            return "xmark.octagon"
+        case .cancelled:
+            return "stop.circle"
+        case .idle, .running:
+            return "circle"
+        }
+    }
+
+    private var resultColor: Color {
+        switch store.missionStatus {
+        case .completed:
+            return .green
+        case .failed:
+            return .red
+        case .cancelled:
+            return .secondary
+        case .idle, .running:
+            return .secondary
         }
     }
 
@@ -465,15 +566,15 @@ struct CursorSurfaceView: View {
     private var voiceFooterText: String {
         switch store.voiceInputState {
         case .ready:
-            return "Start runs Hermes."
+            return "AURA will send this transcript to Hermes."
         case .recording:
-            return "Silence auto-stops."
+            return "Pause to stop automatically, or click Stop."
         case .transcribing:
-            return "Hermes STT."
+            return "Transcribing with Hermes."
         case .failed:
-            return "Clear and try again."
+            return "Clear this and try again."
         case .idle, .requestingPermission:
-            return "Shortcut starts listening."
+            return "Use the shortcut or mic button to start speaking."
         }
     }
 

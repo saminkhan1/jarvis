@@ -11,13 +11,13 @@ struct MissionRunnerView: View {
 
                 Spacer()
 
-                Toggle("Indicator", isOn: $store.isAmbientEnabled)
+                Toggle("Cursor Surface", isOn: $store.isAmbientEnabled)
                     .toggleStyle(.switch)
 
                 MissionStatusPill(status: store.missionStatus)
             }
 
-            Text("Press ⌃⌥⌘A to expand the cursor composer in place. The cursor bot stays anchored near your pointer and turns into the prompt when you need it.")
+            Text("Press ⌃⌥⌘A to open the cursor composer near your pointer. Use it to send a request to Hermes without switching apps.")
                 .font(.callout)
                 .foregroundStyle(.secondary)
 
@@ -53,12 +53,19 @@ struct MissionRunnerView: View {
 
                 Spacer()
 
-                Button(role: .cancel) {
-                    store.cancelMission()
-                } label: {
-                    Label("Cancel", systemImage: "stop.fill")
+                if store.canDismissMissionResult {
+                    Button {
+                        store.dismissMissionResult()
+                    } label: {
+                        Label("Done", systemImage: "checkmark.circle")
+                    }
+                } else if store.canCancelMission {
+                    Button(role: .cancel) {
+                        store.cancelMission()
+                    } label: {
+                        Label("Cancel", systemImage: "stop.fill")
+                    }
                 }
-                .disabled(!store.canCancelMission)
             }
 
             if let snapshot = store.contextSnapshot {

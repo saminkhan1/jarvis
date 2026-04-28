@@ -45,7 +45,7 @@ final class AURAStore: ObservableObject {
     @Published private(set) var voiceInputLevel: Double = 0
     @Published private(set) var voiceInputDuration: TimeInterval = 0
     @Published private(set) var voiceInputTranscript = ""
-    @Published private(set) var voiceInputMessage = "Press the shortcut and start speaking."
+    @Published private(set) var voiceInputMessage = "Use the shortcut or click the mic, then start speaking."
     @Published private(set) var microphonePermissionStatus: MicrophonePermissionStatus = .unknown
     @Published private(set) var isRequestingMicrophonePermission = false
     @Published var inputMode: MissionInputMode {
@@ -186,6 +186,15 @@ final class AURAStore: ObservableObject {
         missionStatus == .running
     }
 
+    var canDismissMissionResult: Bool {
+        switch missionStatus {
+        case .completed, .failed, .cancelled:
+            return true
+        case .idle, .running:
+            return false
+        }
+    }
+
     var shouldShowCuaOnboarding: Bool {
         !isFunctionalSurfaceReady || isRunningCuaOnboarding || isRequestingMicrophonePermission
     }
@@ -243,7 +252,7 @@ final class AURAStore: ObservableObject {
     }
 
     var hermesToolSurfaceSummary: String {
-        "Tool exposure, MCP servers, YOLO approval bypass, and provider setup are owned by project-local Hermes in .aura/hermes-home/config.yaml."
+        "Tool access, MCP servers, and provider setup are configured by Hermes in .aura/hermes-home/config.yaml."
     }
 
     var hermesToolSurfaceSystemImage: String {
@@ -453,7 +462,7 @@ final class AURAStore: ObservableObject {
         voiceInputLevel = 0
         voiceInputDuration = 0
         voiceInputTranscript = ""
-        voiceInputMessage = "Press the shortcut and start speaking."
+        voiceInputMessage = "Use the shortcut or click the mic, then start speaking."
         if inputMode == .voice {
             missionGoal = ""
         }
@@ -473,7 +482,7 @@ final class AURAStore: ObservableObject {
 
         if voiceInputState == .recording || voiceInputState == .transcribing {
             voiceInputState = .idle
-            voiceInputMessage = "Voice input cancelled."
+            voiceInputMessage = "Voice input cancelled. You can start again anytime."
             AURATelemetry.info(
                 .voiceInputCancelled,
                 category: .ui,
@@ -501,7 +510,7 @@ final class AURAStore: ObservableObject {
 
         isRequestingMicrophonePermission = true
         voiceInputState = .requestingPermission
-        voiceInputMessage = "Waiting for macOS microphone permission."
+        voiceInputMessage = "Waiting for macOS microphone permission…"
         syncHostControlAvailability()
         defer {
             isRequestingMicrophonePermission = false
@@ -513,7 +522,7 @@ final class AURAStore: ObservableObject {
         microphonePermissionStatus = status
         if status.isGranted {
             voiceInputState = .idle
-            voiceInputMessage = "Microphone ready. Press the shortcut and start speaking."
+            voiceInputMessage = "Microphone ready. Use the shortcut or click the mic, then start speaking."
         } else {
             voiceInputState = .failed
             voiceInputMessage = status.setupDetail
@@ -562,7 +571,7 @@ final class AURAStore: ObservableObject {
         voiceSpeechStartedAt = nil
         voiceLastSpeechAt = nil
         voiceInputState = .recording
-        voiceInputMessage = "Opening the microphone."
+        voiceInputMessage = "Opening the microphone…"
         voiceInputTranscript = ""
         voiceInputLevel = 0
         voiceInputDuration = 0
@@ -573,7 +582,7 @@ final class AURAStore: ObservableObject {
         do {
             _ = try voiceCaptureService.startRecording()
             voiceInputState = .recording
-            voiceInputMessage = "Listening. Pause after speaking or press Stop."
+            voiceInputMessage = "Listening. Pause after speaking, or click Stop."
             startVoiceMeter()
             AURATelemetry.info(
                 .voiceInputRecordStart,
@@ -620,7 +629,7 @@ final class AURAStore: ObservableObject {
         let traceID = AURATelemetry.makeTraceID(prefix: "voice")
         let recordedDuration = voiceInputDuration
         voiceInputState = .transcribing
-        voiceInputMessage = "Transcribing."
+        voiceInputMessage = "Transcribing with Hermes…"
         AURATelemetry.info(
             .voiceInputRecordStop,
             category: .ui,
@@ -655,7 +664,7 @@ final class AURAStore: ObservableObject {
             voiceInputTranscript = transcript
             missionGoal = transcript
             voiceInputState = .ready
-            voiceInputMessage = "Transcript ready. Starting Hermes."
+            voiceInputMessage = "Transcript ready. Sending to Hermes…"
             activeVoiceInputID = nil
             lastCommand = "./script/aura-hermes aura-transcribe-audio <recording>"
             lastOutput = "Voice transcript captured for the next mission."
@@ -1214,7 +1223,6 @@ final class AURAStore: ObservableObject {
             return
         }
 
-        cursorSurface.collapseToCompact()
         currentHermesSessionID = nil
         let snapshot = missionContextSnapshot(traceID: traceID)
 
@@ -1268,7 +1276,6 @@ final class AURAStore: ObservableObject {
     func cancelMission() {
         guard let missionProcess, missionStatus == .running else { return }
         let traceID = activeMissionTraceID ?? AURATelemetry.makeTraceID(prefix: "mission")
-        cursorSurface.collapseToCompact()
         missionProcess.terminate()
         self.missionProcess = nil
         missionStatus = .cancelled
@@ -1283,6 +1290,15 @@ final class AURAStore: ObservableObject {
             audit: .mission
         )
         appendMissionOutput("\nMission cancelled by user.")
+        clearActiveMissionTrace()
+    }
+
+    func dismissMissionResult() {
+        guard canDismissMissionResult else { return }
+        currentHermesSessionID = nil
+        missionStatus = .idle
+        missionOutput = ""
+        lastUpdated = Date()
         clearActiveMissionTrace()
     }
 
@@ -1323,6 +1339,17 @@ final class AURAStore: ObservableObject {
             category: .ui,
             fields: [.privateValue("path")]
         )
+    }
+
+    private func shellQuoted(_ value: String) -> String {
+        "'\(value.replacingOccurrences(of: "'", with: "'\\''"))'"
+    }
+
+    private func appleScriptString(_ value: String) -> String {
+        let escaped = value
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "\"", with: "\\\"")
+        return "\"\(escaped)\""
     }
 
     func openHermesConfigFile() {
@@ -1484,7 +1511,6 @@ final class AURAStore: ObservableObject {
             lastOutput = missionOutput
             lastUpdated = commandResult.finishedAt
 
-            cursorSurface.collapseToCompact()
             missionStatus = commandResult.succeeded ? .completed : .failed
             let missionDuration = activeMissionStartedAt.map { AURATelemetry.durationMilliseconds(from: $0, to: commandResult.finishedAt) } ?? commandResult.durationMilliseconds
             AURATelemetry.info(
@@ -1505,7 +1531,6 @@ final class AURAStore: ObservableObject {
             clearActiveMissionTrace()
         case .failure(let error):
             let traceID = activeMissionTraceID ?? AURATelemetry.makeTraceID(prefix: "mission")
-            cursorSurface.collapseToCompact()
             missionStatus = .failed
             missionOutput = error.localizedDescription
             lastOutput = missionOutput

@@ -79,12 +79,17 @@ struct MenuBarContentView: View {
                 .keyboardShortcut("a", modifiers: [.control, .option, .command])
                 .disabled(!store.canOpenAmbientEntryPoint)
 
-                Toggle("Cursor Indicator", isOn: $store.isAmbientEnabled)
+                Toggle("Cursor Surface", isOn: $store.isAmbientEnabled)
 
-                Button("Cancel Mission") {
-                    store.cancelMission()
+                if store.canDismissMissionResult {
+                    Button("Done") {
+                        store.dismissMissionResult()
+                    }
+                } else if store.canCancelMission {
+                    Button("Cancel Mission") {
+                        store.cancelMission()
+                    }
                 }
-                .disabled(!store.canCancelMission)
 
                 Button("Run Doctor") {
                     Task { await store.runDoctor() }

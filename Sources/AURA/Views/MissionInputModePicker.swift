@@ -5,13 +5,18 @@ struct MissionInputModePicker: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Picker("Mission Input", selection: $store.inputMode) {
-                ForEach(MissionInputMode.allCases) { mode in
-                    Label(mode.title, systemImage: mode.systemImage)
-                        .tag(mode)
+            if MissionInputMode.allCases.count > 1 {
+                Picker("Mission Input", selection: $store.inputMode) {
+                    ForEach(MissionInputMode.allCases) { mode in
+                        Label(mode.title, systemImage: mode.systemImage)
+                            .tag(mode)
+                    }
                 }
+                .pickerStyle(.segmented)
+            } else {
+                Label(store.inputMode.title, systemImage: store.inputMode.systemImage)
+                    .font(.callout.weight(.medium))
             }
-            .pickerStyle(.segmented)
 
             Label(store.inputMode.summary, systemImage: store.inputMode.systemImage)
                 .font(.caption)

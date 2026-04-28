@@ -125,44 +125,6 @@ if [[ "${1:-}" == "chat" ]]; then
   done
 fi
 
-close_quiet_session() {
-  local output_file="$1"
-  local error_file="$2"
-  local started_epoch_seconds="${3:-0}"
-  local session_id
-
-  session_id="$(
-    awk -F': *' 'tolower($1) == "session_id" { print $2; exit }' \
-      "$error_file" "$output_file" | tr -d '\r'
-  )"
-
-  if [[ -z "$session_id" && -f "$HERMES_HOME/state.db" && "$started_epoch_seconds" =~ ^[0-9]+$ ]]; then
-    session_id="$(
-      sqlite3 "$HERMES_HOME/state.db" \
-        "SELECT id FROM sessions WHERE source = 'cli' AND parent_session_id IS NULL AND ended_at IS NULL AND started_at >= $started_epoch_seconds ORDER BY started_at ASC LIMIT 1;" \
-        2>/dev/null || true
-    )"
-  fi
-
-  if [[ -z "$session_id" || ! "$session_id" =~ ^[A-Za-z0-9_-]+$ ]]; then
-    return 0
-  fi
-
-  if [[ ! -f "$HERMES_HOME/state.db" ]]; then
-    return 0
-  fi
-
-  if [[ -n "$session_source" && "$session_source" =~ ^[A-Za-z0-9_.:-]+$ ]]; then
-    sqlite3 "$HERMES_HOME/state.db" \
-      "WITH RECURSIVE tree(id) AS (SELECT '$session_id' UNION ALL SELECT sessions.id FROM sessions JOIN tree ON sessions.parent_session_id = tree.id) UPDATE sessions SET source = '$session_source' WHERE id IN (SELECT id FROM tree) AND source = 'cli';" \
-      >/dev/null 2>&1 || true
-  fi
-
-  sqlite3 "$HERMES_HOME/state.db" \
-    "WITH RECURSIVE tree(id) AS (SELECT '$session_id' UNION ALL SELECT sessions.id FROM sessions JOIN tree ON sessions.parent_session_id = tree.id) UPDATE sessions SET ended_at = COALESCE((SELECT MAX(timestamp) FROM messages WHERE messages.session_id = sessions.id), strftime('%s','now')), end_reason = COALESCE(end_reason, 'aura_quiet_close') WHERE id IN (SELECT id FROM tree) AND ended_at IS NULL;" \
-    >/dev/null 2>&1 || true
-}
-
 print_aura_voice_doctor() {
   "$HERMES_PYTHON" - <<'PY'
 from tools.voice_mode import check_voice_requirements
@@ -198,7 +160,6 @@ should_log_wrapper_exec() {
 
 if [[ "$is_quiet_chat" == "1" ]]; then
   started_epoch_ms="$(/usr/bin/python3 -c 'import time; print(round(time.time() * 1000))')"
-  started_epoch_seconds="$((started_epoch_ms / 1000))"
   telemetry_log user.info hermes_wrapper_quiet_start operation="$operation" source="${session_source:-none}"
 
   stdout_file="$(mktemp "${TMPDIR:-/tmp}/aura-hermes-stdout.XXXXXX")"
@@ -255,18 +216,10 @@ if [[ "$is_quiet_chat" == "1" ]]; then
     local duration_ms
 
     emit_quiet_output_once
-    close_quiet_session "$stdout_file" "$stderr_file" "$started_epoch_seconds"
     session_id="$(
       awk -F': *' 'tolower($1) == "session_id" { print $2; exit }' \
         "$stderr_file" "$stdout_file" | tr -d '\r'
     )"
-    if [[ -z "$session_id" && -f "$HERMES_HOME/state.db" ]]; then
-      session_id="$(
-        sqlite3 "$HERMES_HOME/state.db" \
-          "SELECT id FROM sessions WHERE parent_session_id IS NULL AND started_at >= $started_epoch_seconds ORDER BY started_at ASC LIMIT 1;" \
-          2>/dev/null || true
-      )"
-    fi
     finished_epoch_ms="$(/usr/bin/python3 -c 'import time; print(round(time.time() * 1000))')"
     duration_ms="$((finished_epoch_ms - started_epoch_ms))"
     if [[ "$status" == "0" ]]; then
