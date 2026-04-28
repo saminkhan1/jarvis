@@ -103,8 +103,7 @@ pass; Developer ID signing and notarization remain release work.
 
 - `Sources/AURA` app shell
 - `script/` runtime wrappers and diagnostics
-- `docs/` beta and integration notes
+- `AURA_CURRENT_STATE_REPORT.md` current code-grounded architecture report
 
 For the launch source of truth and deeper integration details, see
-`docs/AURA_MVP_FINAL_EXECUTION_REPORT.md`, `docs/INTEGRATION_NOTES.md`,
-`docs/BETA_READINESS.md`, and `docs/AURA_MAIN_APPLICABILITY.md`.
+Current architecture notes live in `AURA_CURRENT_STATE_REPORT.md`. Legacy planning docs were removed because they no longer matched the code.

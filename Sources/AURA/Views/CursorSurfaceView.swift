@@ -4,7 +4,7 @@ import SwiftUI
 struct CursorSurfaceView: View {
     @ObservedObject var store: AURAStore
     @ObservedObject var presentation: CursorSurfacePresentation
-    let closeComposer: () -> Void
+    let minimizeSurface: () -> Void
 
     @FocusState private var goalFocused: Bool
 
@@ -62,60 +62,18 @@ struct CursorSurfaceView: View {
 
     @ViewBuilder
     private var compactContent: some View {
-        if usesMinimalCompactIndicator {
-            HStack(spacing: 8) {
-                Circle()
-                    .fill(statusColor)
-                    .frame(width: 10, height: 10)
-                    .shadow(color: statusColor.opacity(0.3), radius: 5, x: 0, y: 0)
+        HStack(spacing: 8) {
+            Circle()
+                .fill(statusColor)
+                .frame(width: 10, height: 10)
+                .shadow(color: statusColor.opacity(0.3), radius: 5, x: 0, y: 0)
 
-                Text(headerStatusText)
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(statusColor)
-                    .lineLimit(1)
+            Text(headerStatusText)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(statusColor)
+                .lineLimit(1)
 
-                Spacer(minLength: 0)
-            }
-        } else {
-            VStack(alignment: .leading, spacing: 10) {
-                HStack(spacing: 10) {
-                    Circle()
-                        .fill(statusColor)
-                        .frame(width: 11, height: 11)
-                        .shadow(color: statusColor.opacity(0.3), radius: 5, x: 0, y: 0)
-
-                    Text(headerStatusText)
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(statusColor)
-
-                    Spacer(minLength: 0)
-
-                    Text(store.hermesToolSurfaceTitle)
-                        .font(.caption2.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 4)
-                        .background(Color.primary.opacity(0.06), in: Capsule())
-                }
-
-                if shouldShowMissionOutput {
-                    ScrollView {
-                        Text(rawMissionOutput)
-                            .font(.system(.caption, design: .monospaced))
-                            .foregroundStyle(.primary)
-                            .textSelection(.enabled)
-                            .frame(maxWidth: .infinity, alignment: .topLeading)
-                    }
-                    .scrollIndicators(.visible)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                } else {
-                    Text(compactStatusText)
-                        .font(.callout.weight(.medium))
-                        .foregroundStyle(.primary)
-                        .lineLimit(4)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-            }
+            Spacer(minLength: 0)
         }
     }
 
@@ -137,12 +95,17 @@ struct CursorSurfaceView: View {
 
                 Spacer(minLength: 0)
 
-                Button(action: closeComposer) {
-                    Image(systemName: "chevron.down")
+                Button(action: minimizeSurface) {
+                    Text("esc")
+                        .font(.caption2.monospaced().weight(.semibold))
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 4)
+                        .background(Color.primary.opacity(0.07), in: RoundedRectangle(cornerRadius: 5, style: .continuous))
                 }
-                .buttonStyle(.borderless)
+                .buttonStyle(.plain)
                 .keyboardShortcut(.cancelAction)
-                .accessibilityLabel("Collapse composer")
+                .accessibilityLabel("Minimize AURA")
             }
 
             switch store.missionStatus {
@@ -161,34 +124,79 @@ struct CursorSurfaceView: View {
 
                 Spacer(minLength: 0)
 
-                switch store.missionStatus {
-                case .running:
-                    Button("Collapse", action: closeComposer)
-                        .buttonStyle(.bordered)
+                footerActions
+            }
+        }
+    }
 
-                    Button("Cancel") {
-                        if store.canCancelVoiceInput {
-                            store.cancelVoiceInput()
-                        } else {
-                            store.cancelMission()
-                        }
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .disabled(!store.canCancelMission && !store.canCancelVoiceInput)
-                case .completed, .failed, .cancelled:
-                    Button("Done") {
-                        store.dismissMissionResult()
-                    }
-                    .buttonStyle(.borderedProminent)
-                case .idle:
+    @ViewBuilder
+    private var footerActions: some View {
+        switch store.missionStatus {
+        case .running:
+            Button("Cancel") {
+                store.cancelMission()
+            }
+            .buttonStyle(.borderedProminent)
+            .disabled(!store.canCancelMission)
+        case .completed, .failed, .cancelled:
+            Button("Done") {
+                store.dismissMissionResult()
+            }
+            .buttonStyle(.borderedProminent)
+        case .idle:
+            switch store.inputMode {
+            case .text:
+                if shouldShowTextStartButton {
                     Button("Start") {
                         Task { await store.startMission() }
                     }
                     .buttonStyle(.borderedProminent)
                     .keyboardShortcut(.return, modifiers: [.command])
-                    .disabled(!store.canStartMission)
                 }
+            case .voice:
+                voiceFooterActions
             }
+        }
+    }
+
+    private var shouldShowTextStartButton: Bool {
+        store.inputMode == .text
+            && store.missionStatus == .idle
+            && store.canStartMission
+    }
+
+    @ViewBuilder
+    private var voiceFooterActions: some View {
+        switch store.voiceInputState {
+        case .recording:
+            Button("Redo") {
+                Task { await store.redoVoiceInput() }
+            }
+            .buttonStyle(.bordered)
+
+            Button("Stop") {
+                Task { await store.toggleVoiceInput() }
+            }
+            .buttonStyle(.borderedProminent)
+        case .ready:
+            Button("Redo") {
+                Task { await store.redoVoiceInput() }
+            }
+            .buttonStyle(.bordered)
+
+            Button("Send") {
+                Task { await store.startMission() }
+            }
+            .buttonStyle(.borderedProminent)
+            .keyboardShortcut(.return, modifiers: [.command])
+            .disabled(!store.canStartMission)
+        case .failed:
+            Button("Redo") {
+                Task { await store.redoVoiceInput() }
+            }
+            .buttonStyle(.borderedProminent)
+        case .idle, .requestingPermission, .transcribing:
+            EmptyView()
         }
     }
 
@@ -239,23 +247,16 @@ struct CursorSurfaceView: View {
     private var voicePromptCard: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .center, spacing: 14) {
-                Button {
-                    Task { await store.toggleVoiceInput() }
-                } label: {
-                    Image(systemName: voiceButtonImage)
-                        .font(.system(size: 30, weight: .semibold))
-                        .foregroundStyle(voiceAccentColor)
-                        .frame(width: 62, height: 62)
-                        .background(voiceAccentColor.opacity(0.12), in: Circle())
-                        .overlay {
-                            Circle()
-                                .strokeBorder(voiceAccentColor.opacity(0.28), lineWidth: 1)
-                        }
-                }
-                .buttonStyle(.plain)
-                .disabled(!store.canToggleVoiceInput)
-                .accessibilityLabel(voiceButtonLabel)
-                .accessibilityIdentifier("aura.cursor.voiceToggle")
+                Image(systemName: voiceButtonImage)
+                    .font(.system(size: 30, weight: .semibold))
+                    .foregroundStyle(voiceAccentColor)
+                    .frame(width: 62, height: 62)
+                    .background(voiceAccentColor.opacity(0.12), in: Circle())
+                    .overlay {
+                        Circle()
+                            .strokeBorder(voiceAccentColor.opacity(0.28), lineWidth: 1)
+                    }
+                .accessibilityHidden(true)
 
                 VStack(alignment: .leading, spacing: 7) {
                     Label(store.voiceInputState.title, systemImage: store.voiceInputState.systemImage)
@@ -279,51 +280,29 @@ struct CursorSurfaceView: View {
                 }
 
                 Spacer(minLength: 0)
-
-                Group {
-                    if store.voiceInputState == .recording {
-                        Button {
-                            Task { await store.toggleVoiceInput() }
-                        } label: {
-                            Label("Stop", systemImage: "stop.fill")
-                        }
-                        .buttonStyle(.borderedProminent)
-                    }
-                }
-                .frame(width: 94, alignment: .trailing)
             }
 
-            if !store.voiceInputTranscript.isEmpty {
-                Text(store.voiceInputTranscript)
+            if store.voiceInputState == .ready {
+                TextEditor(text: $store.missionGoal)
+                    .scrollContentBackground(.hidden)
                     .font(.callout)
-                    .foregroundStyle(.primary)
-                    .lineLimit(3)
-                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(height: 82)
                     .padding(10)
-                    .frame(maxWidth: .infinity, alignment: .leading)
                     .background(Color.black.opacity(0.08), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
                     .overlay(
                         RoundedRectangle(cornerRadius: 9, style: .continuous)
                             .strokeBorder(Color.primary.opacity(0.08), lineWidth: 1)
                     )
-                    .accessibilityIdentifier("aura.cursor.voiceTranscript")
+                    .accessibilityIdentifier("aura.cursor.voiceTranscriptEditor")
             }
 
             HStack {
-                Button {
-                    store.clearVoiceInput()
-                } label: {
-                    Label("Clear", systemImage: "xmark.circle")
-                }
-                .buttonStyle(.bordered)
-                .disabled(store.voiceInputState.isBusy && store.voiceInputState != .recording)
-
-                Spacer(minLength: 0)
-
                 Text(voiceFooterText)
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
+
+                Spacer(minLength: 0)
             }
         }
         .padding(12)
@@ -372,22 +351,12 @@ struct CursorSurfaceView: View {
             .frame(height: 96)
             .foregroundStyle(.primary)
 
-            Text("You can keep this open, collapse it, or cancel the run.")
+            Text("You can keep this open, minimize it, or cancel the run.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
         .padding(12)
         .background(Color.blue.opacity(0.10), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-    }
-
-    private var usesMinimalCompactIndicator: Bool {
-        guard !presentation.isComposerOpen, !shouldShowMissionOutput else { return false }
-        switch store.missionStatus {
-        case .idle, .running, .cancelled:
-            return true
-        case .completed, .failed:
-            return false
-        }
     }
 
     private var statusColor: Color {
@@ -427,32 +396,6 @@ struct CursorSurfaceView: View {
 
     private var hasMissionOutput: Bool {
         !rawMissionOutput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-    }
-
-    private var shouldShowMissionOutput: Bool {
-        switch store.missionStatus {
-        case .running, .completed, .failed:
-            return hasMissionOutput
-        case .idle, .cancelled:
-            return false
-        }
-    }
-
-    private var compactStatusText: String {
-        if store.isShortcutPulseActive {
-            return "Ready for a request."
-        }
-
-        switch store.missionStatus {
-        case .idle:
-            return "Ask Hermes to inspect, explain, research, or operate."
-        case .running:
-            return hasMissionOutput ? rawMissionOutput : "Working on it."
-        case .completed, .failed:
-            return rawMissionOutput
-        case .cancelled:
-            return "Run cancelled."
-        }
     }
 
     private var resultTitle: String {
@@ -544,10 +487,6 @@ struct CursorSurfaceView: View {
         }
     }
 
-    private var voiceButtonLabel: String {
-        store.voiceInputState == .recording ? "Stop voice input" : "Start voice input"
-    }
-
     private var voiceAccentColor: Color {
         switch store.voiceInputState {
         case .failed:
@@ -566,15 +505,15 @@ struct CursorSurfaceView: View {
     private var voiceFooterText: String {
         switch store.voiceInputState {
         case .ready:
-            return "AURA will send this transcript to Hermes."
+            return "Review or edit the transcript before sending."
         case .recording:
             return "Pause to stop automatically, or click Stop."
         case .transcribing:
-            return "Transcribing with Hermes."
+            return "Transcribing audio."
         case .failed:
-            return "Clear this and try again."
+            return "Redo this voice request or press Escape."
         case .idle, .requestingPermission:
-            return "Use the shortcut or mic button to start speaking."
+            return "Use the shortcut to start speaking."
         }
     }
 

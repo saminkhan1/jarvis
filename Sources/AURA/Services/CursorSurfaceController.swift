@@ -5,42 +5,8 @@ enum CursorSurfaceSizing {
     static let defaultCompactPanelSize = NSSize(width: 180, height: 46)
 
     @MainActor
-    static func compactPanelSize(for store: AURAStore?, visibleFrame: NSRect) -> NSSize {
-        guard let store else { return defaultCompactPanelSize }
-
-        switch store.missionStatus {
-        case .idle, .cancelled:
-            return defaultCompactPanelSize
-        case .running:
-            let output = store.missionOutput.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !output.isEmpty else { return NSSize(width: 184, height: 46) }
-            return outputPanelSize(for: output, visibleFrame: visibleFrame, maximumHeightRatio: 0.34)
-        case .completed, .failed:
-            let output = store.missionOutput.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !output.isEmpty else { return defaultCompactPanelSize }
-            return outputPanelSize(for: output, visibleFrame: visibleFrame, maximumHeightRatio: 0.78)
-        }
-    }
-
-    private static func outputPanelSize(
-        for output: String,
-        visibleFrame: NSRect,
-        maximumHeightRatio: CGFloat
-    ) -> NSSize {
-        let availableWidth = max(320, visibleFrame.width - 24)
-        let width = min(max(520, visibleFrame.width * 0.34), min(760, availableWidth))
-        let textWidth = max(180, width - 34)
-        let columns = max(34, Int(textWidth / 7.2))
-        let wrappedLineCount = output
-            .components(separatedBy: .newlines)
-            .reduce(0) { total, line in
-                total + max(1, Int(ceil(Double(max(line.count, 1)) / Double(columns))))
-            }
-
-        let desiredHeight = 58 + CGFloat(wrappedLineCount) * 16
-        let minimumHeight: CGFloat = 180
-        let maximumHeight = max(minimumHeight, min(visibleFrame.height - 24, visibleFrame.height * maximumHeightRatio))
-        return NSSize(width: width, height: min(max(desiredHeight, minimumHeight), maximumHeight))
+    static func compactPanelSize(for _: AURAStore?, visibleFrame _: NSRect) -> NSSize {
+        defaultCompactPanelSize
     }
 }
 
@@ -137,8 +103,8 @@ final class CursorSurfaceController {
             rootView: CursorSurfaceView(
                 store: store,
                 presentation: presentation,
-                closeComposer: { [weak self] in
-                    self?.collapseToCompact()
+                minimizeSurface: { [weak self] in
+                    self?.store?.minimizeAmbientSurface()
                 }
             )
         )
@@ -215,24 +181,11 @@ final class CursorSurfaceController {
     }
 
     private var shouldIgnoreMouseEvents: Bool {
-        !presentation.isComposerOpen && !usesReadableOutputPanel
+        !presentation.isComposerOpen
     }
 
     private var shouldTrackCompactPanel: Bool {
-        !presentation.isComposerOpen && !usesReadableOutputPanel
-    }
-
-    private var usesReadableOutputPanel: Bool {
-        guard let store else { return false }
-        let output = store.missionOutput.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !output.isEmpty else { return false }
-
-        switch store.missionStatus {
-        case .completed, .failed:
-            return true
-        case .idle, .running, .cancelled:
-            return false
-        }
+        !presentation.isComposerOpen
     }
 
     private func panelOrigin(for size: NSSize) -> NSPoint {

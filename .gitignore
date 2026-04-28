@@ -3,6 +3,9 @@
 # AURA-local Hermes install, state, logs, secrets, and generated artifacts.
 .aura/
 
+# Local agent/Hermes scratch state.
+.hermes/
+
 # Local environment/secrets files.
 .env
 .env.*

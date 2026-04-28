@@ -65,6 +65,10 @@ enum AURASessionParsing {
             .first { $0.role == "user" }?
             .content ?? ""
 
+        if let taggedPreview = extractTaggedUserMessage(from: firstUserContent), !taggedPreview.isEmpty {
+            return taggedPreview
+        }
+
         // Compatibility shim for pre-PR4 AURA envelope sessions.
         if let goalPreview = extractSection(named: "USER GOAL", from: firstUserContent), !goalPreview.isEmpty {
             return goalPreview
@@ -72,6 +76,30 @@ enum AURASessionParsing {
 
         let normalized = normalizePreview(firstUserContent)
         return normalized.isEmpty ? "Session \(record.id)" : normalized
+    }
+
+
+    private static func extractTaggedUserMessage(from content: String) -> String? {
+        let openTag = "<user_message source=\"aura\">"
+        let closeTag = "</user_message>"
+        guard let openRange = content.range(of: openTag),
+              let closeRange = content.range(of: closeTag, range: openRange.upperBound..<content.endIndex) else {
+            return nil
+        }
+
+        let escapedMessage = String(content[openRange.upperBound..<closeRange.lowerBound])
+        let unescapedMessage = xmlUnescaped(escapedMessage)
+        let normalized = normalizePreview(unescapedMessage)
+        return normalized.isEmpty ? nil : normalized
+    }
+
+    private static func xmlUnescaped(_ value: String) -> String {
+        value
+            .replacingOccurrences(of: "&quot;", with: "\"")
+            .replacingOccurrences(of: "&apos;", with: "'")
+            .replacingOccurrences(of: "&lt;", with: "<")
+            .replacingOccurrences(of: "&gt;", with: ">")
+            .replacingOccurrences(of: "&amp;", with: "&")
     }
 
     private static func extractSection(named heading: String, from content: String) -> String? {

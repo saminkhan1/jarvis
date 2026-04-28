@@ -45,8 +45,7 @@ final class AURAStore: ObservableObject {
     @Published private(set) var voiceInputState: VoiceInputState = .idle
     @Published private(set) var voiceInputLevel: Double = 0
     @Published private(set) var voiceInputDuration: TimeInterval = 0
-    @Published private(set) var voiceInputTranscript = ""
-    @Published private(set) var voiceInputMessage = "Use the shortcut or click the mic, then start speaking."
+    @Published private(set) var voiceInputMessage = "Use the shortcut to start speaking."
     @Published private(set) var microphonePermissionStatus: MicrophonePermissionStatus = .unknown
     @Published private(set) var isRequestingMicrophonePermission = false
     @Published var inputMode: MissionInputMode {
@@ -175,10 +174,6 @@ final class AURAStore: ObservableObject {
 
     private var canStartVoiceRecording: Bool {
         canToggleVoiceInput && voiceInputState != .recording
-    }
-
-    var canCancelVoiceInput: Bool {
-        voiceInputState == .recording || voiceInputState == .transcribing
     }
 
     var canCancelMission: Bool {
@@ -535,11 +530,15 @@ final class AURAStore: ObservableObject {
         voiceInputState = .idle
         voiceInputLevel = 0
         voiceInputDuration = 0
-        voiceInputTranscript = ""
-        voiceInputMessage = "Use the shortcut or click the mic, then start speaking."
+        voiceInputMessage = "Use the shortcut to start speaking."
         if inputMode == .voice {
             missionGoal = ""
         }
+    }
+
+    func redoVoiceInput() async {
+        clearVoiceInput()
+        await toggleVoiceInput()
     }
 
     func cancelVoiceInput() {
@@ -596,7 +595,7 @@ final class AURAStore: ObservableObject {
         microphonePermissionStatus = status
         if status.isGranted {
             voiceInputState = .idle
-            voiceInputMessage = "Microphone ready. Use the shortcut or click the mic, then start speaking."
+            voiceInputMessage = "Microphone ready. Use the shortcut to start speaking."
         } else {
             voiceInputState = .failed
             voiceInputMessage = status.setupDetail
@@ -646,7 +645,6 @@ final class AURAStore: ObservableObject {
         voiceLastSpeechAt = nil
         voiceInputState = .recording
         voiceInputMessage = "Opening the microphone…"
-        voiceInputTranscript = ""
         voiceInputLevel = 0
         voiceInputDuration = 0
         missionGoal = ""
@@ -735,10 +733,9 @@ final class AURAStore: ObservableObject {
                 throw VoiceTranscriptionError.failed(detail?.isEmpty == false ? detail! : "No speech was detected.")
             }
 
-            voiceInputTranscript = transcript
             missionGoal = transcript
             voiceInputState = .ready
-            voiceInputMessage = "Transcript ready. Sending to Hermes…"
+            voiceInputMessage = "Transcript ready. Review or edit before sending."
             activeVoiceInputID = nil
             lastCommand = "./script/aura-hermes aura-transcribe-audio <recording>"
             lastOutput = "Voice transcript captured for the next mission."
@@ -753,14 +750,12 @@ final class AURAStore: ObservableObject {
                 ],
                 audit: .action
             )
-            await startMission()
         } catch {
             try? FileManager.default.removeItem(at: audioURL)
             guard activeVoiceInputID == voiceInputID, !Task.isCancelled else { return }
             activeVoiceInputID = nil
             voiceInputState = .failed
             voiceInputMessage = error.localizedDescription
-            voiceInputTranscript = ""
             missionGoal = ""
             AURATelemetry.error(
                 .voiceInputTranscribeFailed,
@@ -854,7 +849,7 @@ final class AURAStore: ObservableObject {
         isShortcutPulseActive = true
         updateCursorIndicator()
 
-        if missionStatus != .running {
+        if missionStatus == .idle {
             missionOutput = inputMode == .voice
                 ? "Voice input opened. Listening starts automatically."
                 : "Cursor composer opened. Type a mission goal, then press Command-Return."
@@ -902,6 +897,10 @@ final class AURAStore: ObservableObject {
         captureContext(traceID: traceID)
         cursorSurface.presentComposer(using: self)
         triggerAmbientShortcut()
+    }
+
+    func minimizeAmbientSurface() {
+        cursorSurface.collapseToCompact()
     }
 
     func refreshCuaStatus(traceID: String = AURATelemetry.makeTraceID(prefix: "cua-refresh")) async {
@@ -1261,11 +1260,12 @@ final class AURAStore: ObservableObject {
         }
 
         currentHermesSessionID = nil
-        contextSnapshot = missionContextSnapshot(traceID: traceID)
+        let launchContext = missionContextSnapshot(traceID: traceID)
+        contextSnapshot = launchContext
 
         missionStatus = .running
         missionOutput = "Starting Hermes...\n"
-        lastCommand = "./script/aura-hermes chat -Q --yolo --source aura -q <user prompt>"
+        lastCommand = "./script/aura-hermes chat --yolo --source aura -q <aura tagged prompt>"
         lastOutput = missionOutput
         lastUpdated = Date()
 
@@ -1281,7 +1281,8 @@ final class AURAStore: ObservableObject {
                 audit: .agent
             )
             try launchHermes(arguments: Self.hermesChatArguments(
-                query: trimmedGoal
+                query: trimmedGoal,
+                context: launchContext
             ), environment: Self.hermesEnvironment(
                 missionID: activeMissionID
             ), traceID: traceID)
@@ -1472,10 +1473,33 @@ final class AURAStore: ObservableObject {
         lastUpdated = Date()
     }
 
-    nonisolated static func hermesChatArguments(query: String) -> [String] {
-        var arguments = ["chat", "-Q", "--yolo", "--source", "aura"]
-        arguments.append(contentsOf: ["-q", query])
+    nonisolated static func hermesChatArguments(query: String, context: ContextSnapshot? = nil) -> [String] {
+        var arguments = ["chat", "--yolo", "--source", "aura"]
+        arguments.append(contentsOf: ["-q", hermesTaggedQuery(userMessage: query, context: context)])
         return arguments
+    }
+
+    nonisolated static func hermesTaggedQuery(userMessage: String, context: ContextSnapshot?) -> String {
+        var sections = [
+            "<user_message source=\"aura\">\(xmlEscaped(userMessage))</user_message>"
+        ]
+
+        if let context {
+            sections.append(
+                "<aura_meta type=\"context_snapshot\" version=\"1\">\n\(context.hermesMetadataJSON)\n</aura_meta>"
+            )
+        }
+
+        return sections.joined(separator: "\n")
+    }
+
+    private nonisolated static func xmlEscaped(_ value: String) -> String {
+        value
+            .replacingOccurrences(of: "&", with: "&amp;")
+            .replacingOccurrences(of: "<", with: "&lt;")
+            .replacingOccurrences(of: ">", with: "&gt;")
+            .replacingOccurrences(of: "\"", with: "&quot;")
+            .replacingOccurrences(of: "'", with: "&apos;")
     }
 
     private static func hermesEnvironment(missionID: String?) -> [String: String] {

@@ -3,8 +3,14 @@ import XCTest
 final class CursorSurfaceWorkflowTests: XCTestCase {
     func testMissionStoreDoesNotForceCollapseDuringMissionLifecycle() throws {
         let source = try String(contentsOfFile: "Sources/AURA/Stores/AURAStore.swift", encoding: .utf8)
+        guard let startRange = source.range(of: "func startMission() async"),
+              let blockRange = source.range(of: "private func blockAmbientEntryPoint()") else {
+            XCTFail("Could not locate mission lifecycle source.")
+            return
+        }
+        let lifecycleSource = String(source[startRange.lowerBound..<blockRange.lowerBound])
         XCTAssertFalse(
-            source.contains("cursorSurface.collapseToCompact()"),
+            lifecycleSource.contains("cursorSurface.collapseToCompact()"),
             "AURAStore should not auto-collapse the cursor surface during mission start, cancel, or completion."
         )
     }
@@ -16,8 +22,12 @@ final class CursorSurfaceWorkflowTests: XCTestCase {
             "CursorSurfaceView should render a dedicated result state after Hermes finishes, fails, or is cancelled."
         )
         XCTAssertTrue(
-            source.contains("Button(\"Cancel\")"),
+            source.contains("Button(\"Cancel\""),
             "CursorSurfaceView should expose a Cancel button while Hermes is running."
+        )
+        XCTAssertTrue(
+            source.contains("accessibilityLabel(\"Minimize AURA\")"),
+            "CursorSurfaceView should expose an Escape-wired minimize control."
         )
         XCTAssertTrue(
             source.contains("Button(\"Done\")"),
@@ -30,6 +40,101 @@ final class CursorSurfaceWorkflowTests: XCTestCase {
         XCTAssertFalse(
             source.contains("The composer collapses while Hermes works."),
             "CursorSurfaceView should not claim that the composer auto-collapses anymore."
+        )
+        XCTAssertFalse(
+            source.contains("Close AURA cursor surface"),
+            "CursorSurfaceView should not expose a second close/hide concept."
+        )
+        XCTAssertFalse(
+            source.contains("compactActionButtons"),
+            "The minimized cursor surface should stay passive and button-free."
+        )
+    }
+
+    func testCompactCursorSurfaceIsPassiveForEveryState() throws {
+        let source = try String(contentsOfFile: "Sources/AURA/Services/CursorSurfaceController.swift", encoding: .utf8)
+        XCTAssertTrue(
+            source.contains("private var shouldIgnoreMouseEvents: Bool {\n        !presentation.isComposerOpen\n    }"),
+            "Minimized panels should ignore mouse events in every state."
+        )
+        XCTAssertTrue(
+            source.contains("private var shouldTrackCompactPanel: Bool {\n        !presentation.isComposerOpen\n    }"),
+            "Minimized panels should keep following the cursor in every state."
+        )
+        XCTAssertFalse(
+            source.contains("usesInteractiveCompactPanel"),
+            "The compact surface should not have actionable minimized states."
+        )
+    }
+
+    func testOpeningComposerDoesNotOverwriteMissionResults() throws {
+        let source = try String(contentsOfFile: "Sources/AURA/Stores/AURAStore.swift", encoding: .utf8)
+        XCTAssertTrue(
+            source.contains("if missionStatus == .idle"),
+            "Instructional cursor-composer output should only be injected in the idle state."
+        )
+        XCTAssertFalse(
+            source.contains("if missionStatus != .running"),
+            "Opening the composer from completed, failed, or cancelled states must not overwrite result output."
+        )
+    }
+
+    func testVoiceTranscriptionPausesBeforeHermesStarts() throws {
+        let storeSource = try String(contentsOfFile: "Sources/AURA/Stores/AURAStore.swift", encoding: .utf8)
+        guard let finishRange = storeSource.range(of: "private func finishVoiceInputAndTranscribe"),
+              let meterRange = storeSource.range(of: "private func startVoiceMeter") else {
+            XCTFail("Could not locate voice transcription source.")
+            return
+        }
+        let transcriptionSource = String(storeSource[finishRange.lowerBound..<meterRange.lowerBound])
+
+        XCTAssertTrue(
+            transcriptionSource.contains("missionGoal = transcript"),
+            "The editable mission goal should become the voice transcript."
+        )
+        XCTAssertTrue(
+            transcriptionSource.contains("voiceInputState = .ready"),
+            "Voice transcription should pause in the transcript-ready state."
+        )
+        XCTAssertFalse(
+            transcriptionSource.contains("await startMission()"),
+            "Voice transcription must not auto-start Hermes."
+        )
+        XCTAssertFalse(
+            storeSource.contains("voiceInputTranscript"),
+            "Voice transcript text should not be duplicated outside missionGoal."
+        )
+    }
+
+    func testVoiceReadyActionsAreSendAndRedo() throws {
+        let source = try String(contentsOfFile: "Sources/AURA/Views/CursorSurfaceView.swift", encoding: .utf8)
+        XCTAssertTrue(
+            source.contains("TextEditor(text: $store.missionGoal)"),
+            "The voice transcript should be editable before sending."
+        )
+        XCTAssertTrue(
+            source.contains("Button(\"Send\")"),
+            "The ready voice transcript should expose Send."
+        )
+        XCTAssertTrue(
+            source.contains("Button(\"Redo\")"),
+            "Voice recording and ready states should expose Redo."
+        )
+        XCTAssertTrue(
+            source.contains("Task { await store.redoVoiceInput() }"),
+            "Redo should route through the store so it can discard and immediately restart recording."
+        )
+    }
+
+    func testTextStartIsOnlyRenderedWhenStartable() throws {
+        let source = try String(contentsOfFile: "Sources/AURA/Views/CursorSurfaceView.swift", encoding: .utf8)
+        XCTAssertTrue(
+            source.contains("private var shouldShowTextStartButton: Bool"),
+            "Text Start visibility should be explicit."
+        )
+        XCTAssertTrue(
+            source.contains("store.inputMode == .text\n            && store.missionStatus == .idle\n            && store.canStartMission"),
+            "Start should only render for startable idle text input."
         )
     }
 }

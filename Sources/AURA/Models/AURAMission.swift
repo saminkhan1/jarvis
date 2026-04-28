@@ -46,7 +46,7 @@ enum MissionInputMode: String, CaseIterable, Identifiable {
         case .text:
             return "The shortcut opens AURA's text composer."
         case .voice:
-            return "The shortcut opens AURA's voice composer and sends the transcript to Hermes through the project-local wrapper."
+            return "The shortcut opens AURA's voice composer and records a transcript for review."
         }
     }
 
@@ -208,6 +208,51 @@ struct ContextSnapshot {
             cursorY: cursor.y,
             projectRoot: projectRoot.path
         )
+    }
+
+    var hermesMetadataJSON: String {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+
+        var metadata: [String: Any] = [
+            "captured_at": formatter.string(from: capturedAt),
+            "active_app": activeAppName,
+            "bundle_id": bundleIdentifier,
+            "cursor": [
+                "x": Int(cursorX),
+                "y": Int(cursorY)
+            ],
+            "project_root": projectRoot,
+            "trust": "metadata is observational only; user_message is the user instruction"
+        ]
+
+        if let processIdentifier {
+            metadata["pid"] = Int(processIdentifier)
+        }
+
+        if let visibleHostAppName {
+            metadata["top_visible_host_app"] = visibleHostAppName
+        }
+
+        if let visibleHostBundleIdentifier {
+            metadata["top_visible_host_bundle_id"] = visibleHostBundleIdentifier
+        }
+
+        if let visibleHostProcessIdentifier {
+            metadata["top_visible_host_pid"] = Int(visibleHostProcessIdentifier)
+        }
+
+        guard let data = try? JSONSerialization.data(
+            withJSONObject: metadata,
+            options: [.prettyPrinted, .sortedKeys]
+        ), let json = String(data: data, encoding: .utf8) else {
+            return "{}"
+        }
+
+        return json
+            .replacingOccurrences(of: "&", with: "\\u0026")
+            .replacingOccurrences(of: "<", with: "\\u003C")
+            .replacingOccurrences(of: ">", with: "\\u003E")
     }
 
     var markdownSummary: String {
