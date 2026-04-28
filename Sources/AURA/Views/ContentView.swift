@@ -434,19 +434,76 @@ private struct HermesSessionsCard: View {
                 .disabled(store.isRunning)
             }
 
-            ScrollView(.horizontal) {
-                Text(store.hermesSessionsOutput)
-                    .font(.system(.caption, design: .monospaced))
-                    .textSelection(.enabled)
-                    .padding(12)
-                    .frame(maxWidth: .infinity, alignment: .topLeading)
+            Text(store.hermesSessionsOutput)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            if store.hermesSessionSummaries.isEmpty {
+                if store.hermesSessionsOutput.lowercased().contains("failed") {
+                    ContentUnavailableView(
+                        "Hermes session history unavailable",
+                        systemImage: "exclamationmark.triangle",
+                        description: Text("AURA could not load Hermes-owned session history just now.")
+                    )
+                    .frame(maxWidth: .infinity)
+                } else {
+                    ContentUnavailableView(
+                        "No recent AURA sessions",
+                        systemImage: "clock.badge.xmark",
+                        description: Text("Hermes has no recent AURA-tagged sessions to show yet.")
+                    )
+                    .frame(maxWidth: .infinity)
+                }
+            } else {
+                VStack(alignment: .leading, spacing: 10) {
+                    ForEach(store.hermesSessionSummaries) { session in
+                        VStack(alignment: .leading, spacing: 6) {
+                            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                                Text(session.preview)
+                                    .font(.caption.weight(.semibold))
+                                    .lineLimit(2)
+                                Spacer()
+                                if session.id == store.currentHermesSessionID {
+                                    Text("Current")
+                                        .font(.caption2.weight(.semibold))
+                                        .padding(.horizontal, 6)
+                                        .padding(.vertical, 2)
+                                        .background(Color.accentColor.opacity(0.15), in: Capsule())
+                                }
+                            }
+
+                            HStack(spacing: 12) {
+                                HStack(spacing: 4) {
+                                    Image(systemName: "clock")
+                                    Text(session.lastActive, style: .relative)
+                                }
+                                if session.messageCount > 0 {
+                                    Text("\(session.messageCount) msg")
+                                }
+                            }
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(10)
+                        .background(Color.black.opacity(0.08), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .topLeading)
             }
-            .background(Color.black.opacity(0.08), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .strokeBorder(Color.primary.opacity(0.08), lineWidth: 1)
-            )
-            .frame(maxWidth: .infinity, alignment: .topLeading)
+
+            if store.hermesSessionsOutput.lowercased().contains("failed") {
+                DisclosureGroup("Diagnostics") {
+                    ScrollView(.horizontal) {
+                        Text(store.hermesSessionsOutput)
+                            .font(.system(.caption2, design: .monospaced))
+                            .textSelection(.enabled)
+                            .padding(.top, 6)
+                    }
+                }
+                .font(.caption)
+            }
         }
         .padding(18)
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8, style: .continuous))

@@ -94,8 +94,6 @@ for raw in text.splitlines():
 
     qualified_label = f"{current_kind}.{current_label}"
     missing.append((qualified_label, str(path)))
-    if qualified_label == "mcp_servers.aura-host-runner":
-        print(f"warning: stale aura-host-runner config points at missing command path: {path}", file=sys.stderr)
 
 if missing:
     print("Missing configured runtime command paths:", file=sys.stderr)

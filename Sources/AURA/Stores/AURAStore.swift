@@ -32,6 +32,7 @@ final class AURAStore: ObservableObject {
     @Published private(set) var lastOutput = "Run a Hermes check to see backend status."
     @Published private(set) var lastUpdated: Date?
     @Published private(set) var hermesSessionsOutput = "Hermes sessions have not been checked yet."
+    @Published private(set) var hermesSessionSummaries: [HermesSessionSummary] = []
     @Published private(set) var hermesSessionsUpdated: Date?
     @Published private(set) var hermesConfigOutput = "Hermes config has not been checked yet."
     @Published private(set) var hermesConfigUpdated: Date?
@@ -383,17 +384,37 @@ final class AURAStore: ObservableObject {
     }
 
     func refreshHermesSessions(traceID: String = AURATelemetry.makeTraceID(prefix: "hermes-sessions")) async {
-        await runHermes(arguments: ["sessions", "list", "--source", "aura", "--limit", "8"], updateLastOutput: false, traceID: traceID) { [weak self] result in
-            let output = result.combinedOutput.trimmingCharacters(in: .whitespacesAndNewlines)
-            self?.hermesSessionsOutput = output.isEmpty
+        await runHermes(arguments: ["sessions", "export", "--source", "aura", "-"], updateLastOutput: false, traceID: traceID) { [weak self] result in
+            let exportOutput = result.output.trimmingCharacters(in: .whitespacesAndNewlines)
+            let diagnosticOutput = result.combinedOutput.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard result.succeeded else {
+                self?.hermesSessionSummaries = []
+                self?.hermesSessionsOutput = diagnosticOutput.isEmpty ? "Hermes session export failed." : diagnosticOutput
+                self?.hermesSessionsUpdated = result.finishedAt
+                return
+            }
+
+            let parseResult = AURASessionParsing.sessionSummaries(in: exportOutput, source: "aura", limit: 8)
+            guard parseResult.malformedRecordCount == 0 else {
+                self?.hermesSessionSummaries = []
+                self?.hermesSessionsOutput = "Hermes session export parse failed: \(parseResult.malformedRecordCount) malformed record\(parseResult.malformedRecordCount == 1 ? "" : "s")."
+                self?.hermesSessionsUpdated = result.finishedAt
+                return
+            }
+
+            let summaries = parseResult.summaries
+            self?.hermesSessionSummaries = summaries
+            self?.hermesSessionsOutput = exportOutput.isEmpty
                 ? "No Hermes sessions found."
-                : output
+                : summaries.isEmpty
+                    ? "Hermes session export returned no AURA sessions."
+                    : "Loaded \(summaries.count) Hermes session\(summaries.count == 1 ? "" : "s") from Hermes history."
             self?.hermesSessionsUpdated = result.finishedAt
             AURATelemetry.info(
                 .hermesSessionsRefreshed,
                 category: .hermes,
                 traceID: traceID,
-                fields: [.int("bytes", AURATelemetry.byteCount(output))]
+                fields: [.int("bytes", AURATelemetry.byteCount(exportOutput))]
             )
         }
     }
@@ -1539,6 +1560,9 @@ final class AURAStore: ObservableObject {
                     fields: missionFields([.string("hermes_session_id", parsedSessionID)]),
                     audit: .agent
                 )
+            }
+            Task { [weak self] in
+                await self?.refreshHermesSessions(traceID: traceID)
             }
             missionOutput = output.isEmpty ? "Hermes returned no mission output." : output
             lastOutput = missionOutput

@@ -289,6 +289,11 @@ migrate_cua_mcp_config() {
       return
     fi
 
+    if grep -q "script/aura-host-mcp\|script/aura-host-guard-hook" "$config_target"; then
+      warn "Hermes config still references removed AURA host-runner paths; run ./script/setup.sh to remove stale runtime entries"
+      return
+    fi
+
     if grep -q "script/aura-cua-mcp" "$config_target"; then
       ok "CUA MCP is configured in Hermes"
     else
@@ -342,6 +347,9 @@ if not isinstance(server, dict):
 
 changed = False
 
+if servers.pop("aura-host-runner", None) is not None:
+    changed = True
+
 command = "${AURA_PROJECT_ROOT}/script/aura-cua-mcp"
 if server.get("command") != command:
     server["command"] = command
@@ -378,6 +386,31 @@ if tools.get("exclude") == []:
 for key in ("prompts", "resources"):
     if tools.get(key) is not False:
         tools[key] = False
+        changed = True
+
+hooks = config.get("hooks")
+if isinstance(hooks, dict):
+    pre_tool_call = hooks.get("pre_tool_call")
+    if isinstance(pre_tool_call, list):
+        filtered = []
+        removed = False
+        for hook in pre_tool_call:
+            if isinstance(hook, dict) and hook.get("command") == "./script/aura-host-guard-hook":
+                removed = True
+                continue
+            filtered.append(hook)
+        if removed:
+            changed = True
+            if filtered:
+                hooks["pre_tool_call"] = filtered
+            else:
+                hooks.pop("pre_tool_call", None)
+    elif pre_tool_call is not None:
+        hooks.pop("pre_tool_call", None)
+        changed = True
+
+    if not hooks:
+        config.pop("hooks", None)
         changed = True
 
 if server.get("enabled") is not True:

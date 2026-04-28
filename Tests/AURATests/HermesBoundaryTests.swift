@@ -31,6 +31,50 @@ final class HermesBoundaryTests: XCTestCase {
         XCTAssertNil(AURASessionParsing.sessionID(in: "no session marker here"))
     }
 
+    func testSessionSummariesDecodeHermesExportAndPreferUserGoalPreview() {
+        let older = #"{"id":"older","source":"aura","started_at":1700000000,"last_active":1700000010,"ended_at":1700000010,"message_count":4,"messages":[{"role":"user","content":"AURA MISSION CONTEXT\n\nUSER GOAL\nTell me more about this.\n\nCURRENT MAC CONTEXT\n- Active app: Finder"}]}"#
+        let newer = #"{"id":"newer","source":"aura","started_at":1700000100,"last_active":1700000200,"ended_at":1700000200,"message_count":2,"messages":[{"role":"user","content":"inspect script/setup.sh and summarize its responsibilities"}]}"#
+        let ignored = #"{"id":"ignored-cli","source":"cli","started_at":1700000300,"last_active":1700000400,"ended_at":1700000400,"message_count":1,"messages":[{"role":"user","content":"should not appear"}]}"#
+        let export = [older, newer, ignored].joined(separator: "\n")
+
+        let result = AURASessionParsing.sessionSummaries(in: export, source: "aura", limit: 8)
+        let summaries = result.summaries
+
+        XCTAssertEqual(result.malformedRecordCount, 0)
+        XCTAssertEqual(summaries.map(\.id), ["newer", "older"])
+        XCTAssertEqual(summaries.first?.preview, "inspect script/setup.sh and summarize its responsibilities")
+        XCTAssertEqual(summaries.last?.preview, "Tell me more about this.")
+        XCTAssertEqual(summaries.last?.messageCount, 4)
+    }
+
+    func testSessionSummariesLimitResultsAndFallBackToSessionIdentifierPreview() {
+        let export = [
+            #"{"id":"one","source":"aura","started_at":1,"last_active":3,"ended_at":3,"message_count":0,"messages":[]}"#,
+            #"{"id":"two","source":"aura","started_at":1,"last_active":2,"ended_at":2,"message_count":0,"messages":[]}"#
+        ].joined(separator: "\n")
+
+        let result = AURASessionParsing.sessionSummaries(in: export, source: "aura", limit: 1)
+        let summaries = result.summaries
+
+        XCTAssertEqual(result.malformedRecordCount, 0)
+        XCTAssertEqual(summaries.count, 1)
+        XCTAssertEqual(summaries.first?.id, "one")
+        XCTAssertEqual(summaries.first?.preview, "Session one")
+    }
+
+    func testSessionSummariesReportMalformedExportRecords() {
+        let export = [
+            #"{"id":"valid","source":"aura","started_at":1,"last_active":3,"ended_at":3,"message_count":1,"messages":[{"role":"user","content":"hello"}]}"#,
+            "{not-json}"
+        ].joined(separator: "\n")
+
+        let result = AURASessionParsing.sessionSummaries(in: export, source: "aura", limit: 8)
+
+        XCTAssertEqual(result.malformedRecordCount, 1)
+        XCTAssertEqual(result.summaries.count, 1)
+        XCTAssertEqual(result.summaries.first?.id, "valid")
+    }
+
     func testHermesChatArgumentsPassRawPromptWithoutAuraMissionEnvelope() {
         let query = "what can you help me do in this repo?"
 
