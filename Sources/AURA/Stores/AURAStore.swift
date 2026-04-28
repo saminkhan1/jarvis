@@ -153,13 +153,15 @@ final class AURAStore: ObservableObject {
     }
 
     var canStartMission: Bool {
-        !missionGoal.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            && missionStatus != .running
-            && !isRunning
-            && !isRunningCuaOnboarding
-            && !isRequestingMicrophonePermission
-            && cuaStatus.readyForHostControl
-            && isMissionInputReady
+        Self.canStartMission(
+            trimmedGoal: missionGoal,
+            missionStatusRunning: missionStatus == .running,
+            isRunning: isRunning,
+            isRunningCuaOnboarding: isRunningCuaOnboarding,
+            isRequestingMicrophonePermission: isRequestingMicrophonePermission,
+            cuaReadyForHostControl: cuaStatus.readyForHostControl,
+            isMissionInputReady: isMissionInputReady
+        )
     }
 
     var canToggleVoiceInput: Bool {
@@ -196,7 +198,12 @@ final class AURAStore: ObservableObject {
     }
 
     var shouldShowCuaOnboarding: Bool {
-        !isFunctionalSurfaceReady || isRunningCuaOnboarding || isRequestingMicrophonePermission
+        Self.shouldShowCuaOnboarding(
+            cuaReadyForHostControl: cuaStatus.readyForHostControl,
+            isMissionInputReady: isMissionInputReady,
+            isRunningCuaOnboarding: isRunningCuaOnboarding,
+            isRequestingMicrophonePermission: isRequestingMicrophonePermission
+        )
     }
 
     var canOpenAmbientEntryPoint: Bool {
@@ -204,7 +211,10 @@ final class AURAStore: ObservableObject {
     }
 
     var isFunctionalSurfaceReady: Bool {
-        cuaStatus.readyForHostControl && isMissionInputReady
+        Self.isFunctionalSurfaceReady(
+            cuaReadyForHostControl: cuaStatus.readyForHostControl,
+            isMissionInputReady: isMissionInputReady
+        )
     }
 
     var setupStatusTitle: String {
@@ -245,6 +255,43 @@ final class AURAStore: ObservableObject {
         case .voice:
             return microphonePermissionStatus.isGranted
         }
+    }
+
+    static func canStartMission(
+        trimmedGoal: String,
+        missionStatusRunning: Bool,
+        isRunning: Bool,
+        isRunningCuaOnboarding: Bool,
+        isRequestingMicrophonePermission: Bool,
+        cuaReadyForHostControl: Bool,
+        isMissionInputReady: Bool
+    ) -> Bool {
+        !trimmedGoal.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && !missionStatusRunning
+            && !isRunning
+            && !isRunningCuaOnboarding
+            && !isRequestingMicrophonePermission
+            && cuaReadyForHostControl
+            && isMissionInputReady
+    }
+
+    static func isFunctionalSurfaceReady(
+        cuaReadyForHostControl: Bool,
+        isMissionInputReady: Bool
+    ) -> Bool {
+        cuaReadyForHostControl && isMissionInputReady
+    }
+
+    static func shouldShowCuaOnboarding(
+        cuaReadyForHostControl: Bool,
+        isMissionInputReady: Bool,
+        isRunningCuaOnboarding: Bool,
+        isRequestingMicrophonePermission: Bool
+    ) -> Bool {
+        !isFunctionalSurfaceReady(
+            cuaReadyForHostControl: cuaReadyForHostControl,
+            isMissionInputReady: isMissionInputReady
+        ) || isRunningCuaOnboarding || isRequestingMicrophonePermission
     }
 
     var hermesToolSurfaceTitle: String {

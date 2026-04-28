@@ -595,6 +595,7 @@ print_next_steps() {
   cat <<EOF
 Run these from the repo root:
   ./script/aura-hermes doctor
+  ./script/verify_runtime_paths.sh
   ./script/connection_matrix.sh
   ./script/e2e_test.sh
   ./script/build_and_run.sh --verify
