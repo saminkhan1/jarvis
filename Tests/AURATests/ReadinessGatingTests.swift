@@ -3,15 +3,14 @@ import XCTest
 
 @MainActor
 final class ReadinessGatingTests: XCTestCase {
-    func testMissionStartRequiresHostControlReadinessUnderCurrentGlobalGate() {
-        XCTAssertFalse(
+    func testMissionStartDoesNotRequireHostControlReadinessForNormalChat() {
+        XCTAssertTrue(
             AURAStore.canStartMission(
                 trimmedGoal: "Summarize logs",
                 missionStatusRunning: false,
                 isRunning: false,
                 isRunningCuaOnboarding: false,
                 isRequestingMicrophonePermission: false,
-                cuaReadyForHostControl: false,
                 isMissionInputReady: true
             )
         )
@@ -25,7 +24,6 @@ final class ReadinessGatingTests: XCTestCase {
                 isRunning: false,
                 isRunningCuaOnboarding: false,
                 isRequestingMicrophonePermission: false,
-                cuaReadyForHostControl: true,
                 isMissionInputReady: true
             )
         )
@@ -37,7 +35,6 @@ final class ReadinessGatingTests: XCTestCase {
                 isRunning: false,
                 isRunningCuaOnboarding: false,
                 isRequestingMicrophonePermission: false,
-                cuaReadyForHostControl: true,
                 isMissionInputReady: true
             )
         )
@@ -49,7 +46,6 @@ final class ReadinessGatingTests: XCTestCase {
                 isRunning: false,
                 isRunningCuaOnboarding: false,
                 isRequestingMicrophonePermission: false,
-                cuaReadyForHostControl: true,
                 isMissionInputReady: true
             )
         )
@@ -61,13 +57,46 @@ final class ReadinessGatingTests: XCTestCase {
                 isRunning: false,
                 isRunningCuaOnboarding: false,
                 isRequestingMicrophonePermission: false,
-                cuaReadyForHostControl: true,
                 isMissionInputReady: false
             )
         )
     }
 
-    func testOnboardingVisibilityTracksCurrentGlobalFunctionalReadinessModel() {
+    func testAmbientEntryPointRequiresReadyInputButNotHostControl() {
+        XCTAssertTrue(
+            AURAStore.canOpenAmbientEntryPoint(
+                isRunningCuaOnboarding: false,
+                isRequestingMicrophonePermission: false,
+                isMissionInputReady: true
+            )
+        )
+
+        XCTAssertFalse(
+            AURAStore.canOpenAmbientEntryPoint(
+                isRunningCuaOnboarding: true,
+                isRequestingMicrophonePermission: false,
+                isMissionInputReady: true
+            )
+        )
+
+        XCTAssertFalse(
+            AURAStore.canOpenAmbientEntryPoint(
+                isRunningCuaOnboarding: false,
+                isRequestingMicrophonePermission: true,
+                isMissionInputReady: true
+            )
+        )
+
+        XCTAssertFalse(
+            AURAStore.canOpenAmbientEntryPoint(
+                isRunningCuaOnboarding: false,
+                isRequestingMicrophonePermission: false,
+                isMissionInputReady: false
+            )
+        )
+    }
+
+    func testOnboardingVisibilityTracksCapabilitySpecificReadiness() {
         XCTAssertTrue(
             AURAStore.shouldShowCuaOnboarding(
                 cuaReadyForHostControl: false,

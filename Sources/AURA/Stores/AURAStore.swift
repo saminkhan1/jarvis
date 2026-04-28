@@ -159,7 +159,6 @@ final class AURAStore: ObservableObject {
             isRunning: isRunning,
             isRunningCuaOnboarding: isRunningCuaOnboarding,
             isRequestingMicrophonePermission: isRequestingMicrophonePermission,
-            cuaReadyForHostControl: cuaStatus.readyForHostControl,
             isMissionInputReady: isMissionInputReady
         )
     }
@@ -170,7 +169,6 @@ final class AURAStore: ObservableObject {
             && !isRunning
             && !isRunningCuaOnboarding
             && !isRequestingMicrophonePermission
-            && cuaStatus.readyForHostControl
             && microphonePermissionStatus.isGranted
             && voiceInputState != .requestingPermission
             && voiceInputState != .transcribing
@@ -207,7 +205,11 @@ final class AURAStore: ObservableObject {
     }
 
     var canOpenAmbientEntryPoint: Bool {
-        isFunctionalSurfaceReady && !isRunningCuaOnboarding && !isRequestingMicrophonePermission
+        Self.canOpenAmbientEntryPoint(
+            isRunningCuaOnboarding: isRunningCuaOnboarding,
+            isRequestingMicrophonePermission: isRequestingMicrophonePermission,
+            isMissionInputReady: isMissionInputReady
+        )
     }
 
     var isFunctionalSurfaceReady: Bool {
@@ -263,7 +265,6 @@ final class AURAStore: ObservableObject {
         isRunning: Bool,
         isRunningCuaOnboarding: Bool,
         isRequestingMicrophonePermission: Bool,
-        cuaReadyForHostControl: Bool,
         isMissionInputReady: Bool
     ) -> Bool {
         !trimmedGoal.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -271,7 +272,16 @@ final class AURAStore: ObservableObject {
             && !isRunning
             && !isRunningCuaOnboarding
             && !isRequestingMicrophonePermission
-            && cuaReadyForHostControl
+            && isMissionInputReady
+    }
+
+    static func canOpenAmbientEntryPoint(
+        isRunningCuaOnboarding: Bool,
+        isRequestingMicrophonePermission: Bool,
+        isMissionInputReady: Bool
+    ) -> Bool {
+        !isRunningCuaOnboarding
+            && !isRequestingMicrophonePermission
             && isMissionInputReady
     }
 
@@ -314,9 +324,7 @@ final class AURAStore: ObservableObject {
         await refreshStatus(traceID: traceID)
         await refreshCuaStatus(traceID: traceID)
         await refreshConnectionReadiness(traceID: traceID)
-        if cuaStatus.readyForHostControl {
-            await refreshHermesSessions(traceID: traceID)
-        }
+        await refreshHermesSessions(traceID: traceID)
         AURATelemetry.info(
             .refreshAllFinish,
             category: .hermes,
@@ -341,9 +349,7 @@ final class AURAStore: ObservableObject {
         await refreshHermesConfigStatus(traceID: traceID)
         await refreshStatus(traceID: traceID)
         await refreshPermissionStatus(traceID: traceID)
-        if cuaStatus.readyForHostControl {
-            await refreshHermesSessions(traceID: traceID)
-        }
+        await refreshHermesSessions(traceID: traceID)
         AURATelemetry.info(
             .launchOnboardingFinish,
             category: .hermes,
@@ -1046,15 +1052,20 @@ final class AURAStore: ObservableObject {
     }
 
     private func updateCuaOnboardingMessage() {
-        if isFunctionalSurfaceReady {
-            cuaOnboardingMessage = "Setup is ready. AURA is unlocked."
+        if inputMode == .voice && !isMissionInputReady {
+            cuaOnboardingMessage = "Voice input needs microphone access before it can start."
             return
         }
 
-        let issues = readinessIssues
+        if cuaStatus.readyForHostControl {
+            cuaOnboardingMessage = "Setup is ready. Host control is available."
+            return
+        }
+
+        let issues = cuaStatus.issues
         cuaOnboardingMessage = issues.isEmpty
-            ? "Complete setup before using AURA."
-            : "AURA is locked until: \(issues.joined(separator: " "))"
+            ? "Hermes chat is available. Complete CUA setup before using host control."
+            : "Hermes chat is available. Complete CUA setup before using host control: \(issues.joined(separator: " "))"
     }
 
     func registerCuaDriverWithHermes(traceID: String = AURATelemetry.makeTraceID(prefix: "cua-mcp")) async {
@@ -1215,24 +1226,6 @@ final class AURAStore: ObservableObject {
             audit: .mission
         )
 
-        guard cuaStatus.readyForHostControl else {
-            AURATelemetry.warning(
-                .missionStartBlocked,
-                category: .mission,
-                traceID: traceID,
-                fields: missionFields([
-                    .string("reason", "cua_not_ready"),
-                    .int("issue_count", self.cuaStatus.issues.count),
-                    .int("duration_ms", AURATelemetry.durationMilliseconds(from: requestedAt))
-                ]),
-                audit: .mission
-            )
-            lockFunctionalSurfaceForOnboarding()
-            blockAmbientEntryPoint()
-            clearActiveMissionTrace()
-            return
-        }
-
         guard isMissionInputReady else {
             AURATelemetry.warning(
                 .missionStartBlocked,
@@ -1245,7 +1238,6 @@ final class AURAStore: ObservableObject {
                 ]),
                 audit: .mission
             )
-            lockFunctionalSurfaceForOnboarding()
             blockAmbientEntryPoint()
             clearActiveMissionTrace()
             return
@@ -1607,8 +1599,10 @@ final class AURAStore: ObservableObject {
             ],
             audit: .governance
         )
-        missionOutput = "AURA is locked until setup is complete."
-        lastCommand = "host-lane check"
+        missionOutput = inputMode == .voice
+            ? "Voice input is unavailable until microphone setup is complete."
+            : "Ambient entry is temporarily unavailable."
+        lastCommand = "ambient entry check"
         lastOutput = "\(missionOutput)\n\(readinessIssuesText())"
         lastUpdated = Date()
         updateCuaOnboardingMessage()
@@ -1628,7 +1622,7 @@ final class AURAStore: ObservableObject {
     }
 
     private func syncHostControlAvailability() {
-        let ready = isFunctionalSurfaceReady
+        let ready = cuaStatus.readyForHostControl
         if lastHostControlReady != ready {
             AURATelemetry.info(
                 .hostControlStateChanged,
@@ -1643,7 +1637,7 @@ final class AURAStore: ObservableObject {
             lastHostControlReady = ready
         }
 
-        if isFunctionalSurfaceReady {
+        if canOpenAmbientEntryPoint {
             globalHotKey.register()
         } else {
             globalHotKey.unregister()
@@ -1651,56 +1645,14 @@ final class AURAStore: ObservableObject {
                 cursorSurface.hide()
                 isShortcutPulseActive = false
             } else {
-                lockFunctionalSurfaceForOnboarding()
+                blockAmbientEntryPoint()
             }
         }
         updateCursorIndicator()
     }
 
     private func updateCursorIndicator() {
-        cursorSurface.setVisible(isAmbientEnabled && isFunctionalSurfaceReady, store: self)
-    }
-
-    private func lockFunctionalSurfaceForOnboarding() {
-        let traceID = activeMissionTraceID ?? AURATelemetry.makeTraceID(prefix: "host-lock")
-        let hadActiveWork = missionProcess != nil
-            || missionStatus == .running
-
-        if hadActiveWork {
-            AURATelemetry.warning(
-                .hostControlLock,
-                category: .cua,
-                traceID: traceID,
-                fields: missionFields([
-                    .bool("had_mission_process", self.missionProcess != nil),
-                    .string("status", self.missionStatus.title)
-                ]),
-                audit: .governance
-            )
-        } else {
-            AURATelemetry.debug(
-                .hostControlLockIdle,
-                category: .cua,
-                traceID: traceID,
-                fields: missionFields([.string("status", self.missionStatus.title)])
-            )
-        }
-        cursorSurface.hide()
-        isShortcutPulseActive = false
-
-        if let missionProcess {
-            missionProcess.terminate()
-            self.missionProcess = nil
-        }
-
-        if missionStatus == .running {
-            currentHermesSessionID = nil
-            missionStatus = .cancelled
-            missionOutput = "AURA locked because setup is incomplete."
-            lastCommand = "setup lock"
-            lastOutput = missionOutput
-            lastUpdated = Date()
-        }
+        cursorSurface.setVisible(isAmbientEnabled && canOpenAmbientEntryPoint, store: self)
     }
 
     private func clearActiveMissionTrace() {

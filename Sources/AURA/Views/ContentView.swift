@@ -9,16 +9,15 @@ struct ContentView: View {
             VStack(alignment: .leading, spacing: 16) {
                 if store.shouldShowCuaOnboarding {
                     OnboardingGateView(store: store)
-                } else {
-                    DashboardHeader(store: store)
-                    StatusGrid(store: store)
-                    MissionConfigurationCard(store: store)
-                    ReadinessCenterView(store: store)
-                    MissionRunnerView(store: store)
-                    HermesSessionsCard(store: store)
-                    HermesControlCard(store: store)
-                    MissionOutputView(store: store)
                 }
+                DashboardHeader(store: store)
+                StatusGrid(store: store)
+                MissionConfigurationCard(store: store)
+                ReadinessCenterView(store: store)
+                MissionRunnerView(store: store)
+                HermesSessionsCard(store: store)
+                HermesControlCard(store: store)
+                MissionOutputView(store: store)
             }
             .padding(24)
             .frame(maxWidth: .infinity, alignment: .topLeading)
@@ -40,9 +39,9 @@ private struct OnboardingGateView: View {
                     .foregroundStyle(.orange)
 
                 VStack(alignment: .leading, spacing: 6) {
-                    Text("AURA Setup Required")
+                    Text("Host Control Setup")
                         .font(.title.bold())
-                    Text("AURA is locked until host control and the selected mission input are ready.")
+                    Text("Hermes chat stays available while you finish CUA or microphone setup.")
                         .font(.callout)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -87,7 +86,7 @@ private struct OnboardingGateView: View {
                     title: "Cua Driver",
                     detail: store.cuaStatus.isInstalled
                         ? store.cuaStatus.executablePath ?? "Installed"
-                        : "Install Cua Driver before AURA can start.",
+                        : "Install Cua Driver before host control can start.",
                     isComplete: store.cuaStatus.isInstalled,
                     actionTitle: store.cuaStatus.isInstalled ? nil : "Copy Setup"
                 ) {
