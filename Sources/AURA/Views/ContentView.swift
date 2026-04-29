@@ -83,10 +83,10 @@ private struct OnboardingGateView: View {
 
             VStack(spacing: 6) {
                 CuaSetupRow(
-                    title: "Cua Driver",
+                    title: "AURA Host Control",
                     detail: store.cuaStatus.isInstalled
                         ? store.cuaStatus.executablePath ?? "Installed"
-                        : "Install Cua Driver before host control can start.",
+                        : "Install CUA support before host control can start.",
                     isComplete: store.cuaStatus.isInstalled,
                     actionTitle: store.cuaStatus.isInstalled ? nil : "Copy Setup"
                 ) {
@@ -94,7 +94,7 @@ private struct OnboardingGateView: View {
                 }
 
                 CuaSetupRow(
-                    title: "Cua Driver Daemon",
+                    title: "Host-Control Helper",
                     detail: store.cuaStatus.daemonStatus,
                     isComplete: store.cuaStatus.daemonRunning,
                     actionTitle: store.cuaStatus.isInstalled && !store.cuaStatus.daemonRunning ? "Start" : nil
@@ -104,7 +104,7 @@ private struct OnboardingGateView: View {
 
                 CuaSetupRow(
                     title: "Accessibility",
-                    detail: "Grant CuaDriver.app access to inspect and target app UI.",
+                    detail: "Grant AURA access to inspect and target app UI.",
                     isComplete: store.cuaStatus.accessibilityGranted == true,
                     actionTitle: canRequestPermissions && store.cuaStatus.accessibilityGranted != true ? "Grant" : nil
                 ) {
@@ -113,7 +113,7 @@ private struct OnboardingGateView: View {
 
                 CuaSetupRow(
                     title: "Screen Recording",
-                    detail: "Grant CuaDriver.app access to inspect visible screen content.",
+                    detail: "Grant AURA access to inspect visible screen content.",
                     isComplete: store.cuaStatus.screenRecordingGranted == true,
                     actionTitle: canRequestPermissions && store.cuaStatus.screenRecordingGranted != true ? "Grant" : nil
                 ) {

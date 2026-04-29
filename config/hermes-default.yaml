@@ -15,14 +15,14 @@ model:
 terminal:
   backend: local
   cwd: .
-  timeout: 180
-  lifetime_seconds: 300
+  timeout: 1800
+  lifetime_seconds: 3000
   docker_mount_cwd_to_workspace: false
   persistent_shell: true
 
 agent:
-  max_turns: 60
-  api_max_retries: 3
+  max_turns: 200
+  api_max_retries: 5
   reasoning_effort: medium
   verbose: false
 

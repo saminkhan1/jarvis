@@ -121,6 +121,10 @@ final class AURAStore: ObservableObject {
     private static let voiceNoSpeechTimeoutSeconds: TimeInterval = 15.0
     private static let voiceMaxRecordingSeconds: TimeInterval = 120.0
 
+    var currentMissionStartedAt: Date? {
+        activeMissionStartedAt
+    }
+
     private var activeMissionIDValue: String {
         activeMissionID ?? "none"
     }
@@ -1098,7 +1102,7 @@ final class AURAStore: ObservableObject {
 
         guard cuaDriverService.recommendedCuaDriverCommandPath(for: cuaStatus) != nil else {
             lastCommand = "enable Hermes computer_use"
-            lastOutput = "Cua Driver is not installed. Install it first, then enable Hermes computer_use."
+            lastOutput = "AURA host-control support is not installed. Run setup first, then enable Hermes computer_use."
             lastUpdated = Date()
             AURATelemetry.warning(
                 .cuaComputerUseEnableBlocked,
@@ -1355,11 +1359,11 @@ final class AURAStore: ObservableObject {
     }
 
     func copyCuaDaemonCommand() {
-        let command = "open -n -g /Applications/CuaDriver.app --args serve"
+        let command = "\(AURAPaths.projectRoot.path)/dist/AURA.app/Contents/MacOS/cua-driver serve"
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(command, forType: .string)
         lastCommand = "copy cua daemon command"
-        lastOutput = "Copied Cua Driver daemon command:\n\(command)"
+        lastOutput = "Copied AURA host-control helper command:\n\(command)"
         lastUpdated = Date()
         AURATelemetry.info(.cuaDaemonCommandCopied, category: .ui)
     }

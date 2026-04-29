@@ -351,12 +351,31 @@ struct CursorSurfaceView: View {
             .frame(height: 96)
             .foregroundStyle(.primary)
 
-            Text("You can keep this open, minimize it, or cancel the run.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+            TimelineView(.periodic(from: store.currentMissionStartedAt ?? Date(), by: 1)) { context in
+                Text(runningFooterText(now: context.date))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
         }
         .padding(12)
         .background(Color.blue.opacity(0.10), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+    }
+
+    private func runningFooterText(now: Date) -> String {
+        guard let startedAt = store.currentMissionStartedAt else {
+            return "You can keep this open, minimize it, or cancel the run."
+        }
+
+        let elapsed = max(0, Int(now.timeIntervalSince(startedAt)))
+        let minutes = elapsed / 60
+        let seconds = elapsed % 60
+        let formatted = minutes > 0 ? "\(minutes)m \(seconds)s" : "\(seconds)s"
+
+        if elapsed >= 180 {
+            return "Still working · \(formatted) elapsed · Cancel anytime."
+        }
+
+        return "Working · \(formatted) elapsed · You can minimize or cancel."
     }
 
     private var statusColor: Color {

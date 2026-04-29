@@ -21,6 +21,7 @@ struct CuaDriverStatus {
     var accessibilityGranted: Bool?
     var screenRecordingGranted: Bool?
     var isHermesComputerUseEnabled: Bool
+    var isHermesComputerUseSmokePassed: Bool
     var lastCheckedAt: Date?
 
     static let unknown = CuaDriverStatus(
@@ -30,6 +31,7 @@ struct CuaDriverStatus {
         accessibilityGranted: nil,
         screenRecordingGranted: nil,
         isHermesComputerUseEnabled: false,
+        isHermesComputerUseSmokePassed: false,
         lastCheckedAt: nil
     )
 
@@ -69,7 +71,7 @@ struct CuaDriverStatus {
     }
 
     var hostSetupReady: Bool {
-        isInstalled && daemonRunning && isHermesComputerUseEnabled
+        isInstalled && isHermesComputerUseEnabled && isHermesComputerUseSmokePassed
     }
 
     var readyForHostControl: Bool {
@@ -77,7 +79,7 @@ struct CuaDriverStatus {
     }
 
     var permissionIssues: [String] {
-        guard isInstalled, daemonRunning else { return [] }
+        guard isInstalled else { return [] }
 
         var result: [String] = []
 
@@ -85,7 +87,7 @@ struct CuaDriverStatus {
         case .some(true):
             break
         case .some(false):
-            result.append("Grant Accessibility permission to Cua Driver.")
+            result.append("Grant Accessibility permission to AURA.")
         case .none:
             result.append("Check Accessibility permission.")
         }
@@ -94,7 +96,7 @@ struct CuaDriverStatus {
         case .some(true):
             break
         case .some(false):
-            result.append("Grant Screen Recording permission to Cua Driver.")
+            result.append("Grant Screen Recording permission to AURA.")
         case .none:
             result.append("Check Screen Recording permission.")
         }
@@ -106,15 +108,15 @@ struct CuaDriverStatus {
         var result: [String] = []
 
         if !isInstalled {
-            result.append("Install Cua Driver first.")
-        }
-
-        if isInstalled && !daemonRunning {
-            result.append("Start CuaDriver daemon.")
+            result.append("Install AURA host-control support first.")
         }
 
         if isInstalled && !isHermesComputerUseEnabled {
             result.append("Enable Hermes computer_use for CUA missions.")
+        }
+
+        if isInstalled && isHermesComputerUseEnabled && !isHermesComputerUseSmokePassed {
+            result.append("Verify Hermes computer_use can list apps and capture the screen.")
         }
 
         return result
@@ -129,16 +131,16 @@ struct CuaDriverStatus {
             return "Not installed"
         }
 
-        if !daemonRunning {
-            return "Daemon needed"
-        }
-
         if isInstalled && !permissionsReady {
             return "Permissions needed"
         }
 
         if !isHermesComputerUseEnabled {
             return "Hermes computer_use disabled"
+        }
+
+        if !isHermesComputerUseSmokePassed {
+            return "Host-control smoke needed"
         }
 
         return "Not ready"

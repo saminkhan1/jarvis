@@ -561,7 +561,7 @@ check_hermes_computer_use() {
 }
 
 check_cua() {
-  section "CUA Driver passive readiness"
+  section "CUA Driver source binary"
 
   local cua_bin="/Applications/CuaDriver.app/Contents/MacOS/cua-driver"
   if [[ ! -x "$cua_bin" ]] && command -v cua-driver >/dev/null 2>&1; then
@@ -577,42 +577,12 @@ MSG
     return
   fi
 
-  ok "Cua Driver binary: $cua_bin"
-
-  local status_output
-  if status_output="$("$cua_bin" status 2>&1)"; then
-    local normalized_status
-    normalized_status="$(lowercase "$status_output")"
-    if [[ "$normalized_status" == *"daemon is running"* || "$normalized_status" == *"is running"* ]]; then
-      ok "Cua Driver daemon is running"
-    else
-      warn "Cua Driver daemon is not running."
-      printf "  Start it with:\n    open -n -g /Applications/CuaDriver.app --args serve\n"
-    fi
-  else
-    warn "Could not read Cua Driver daemon status."
-    printf "%s\n" "$status_output" >&2
-  fi
-
-  local permissions_output
-  if permissions_output="$("$cua_bin" call check_permissions '{"prompt":false}' 2>&1)"; then
-    local normalized_permissions
-    normalized_permissions="$(lowercase "$permissions_output")"
-    if [[ "$normalized_permissions" == *"accessibility: granted"* && "$normalized_permissions" == *"screen recording: granted"* ]]; then
-      ok "Cua Driver Accessibility and Screen Recording permissions are granted"
-    else
-      warn "Cua Driver permissions are incomplete."
-      cat <<'MSG'
-  Open System Settings > Privacy & Security, then grant CuaDriver.app:
-    - Accessibility
-    - Screen Recording
-  Restart the CUA daemon after changing permissions.
+  ok "CUA source binary: $cua_bin"
+  cat <<'MSG'
+  AURA embeds this binary into dist/AURA.app/Contents/MacOS/cua-driver
+  during ./script/build_and_run.sh and signs it as com.wexprolabs.aura.
+  Grant Accessibility and Screen Recording to AURA, not CuaDriver.app.
 MSG
-    fi
-  else
-    warn "Could not check Cua Driver permissions passively."
-    printf "%s\n" "$permissions_output" >&2
-  fi
 }
 
 print_next_steps() {

@@ -1,10 +1,12 @@
+import ApplicationServices
 import AppKit
+import CoreGraphics
 import Darwin
 import Foundation
 
 final class CuaDriverService {
-    private let appBundle = "/Applications/CuaDriver.app"
-    private let appBinary = "/Applications/CuaDriver.app/Contents/MacOS/cua-driver"
+    private let helperName = "cua-driver"
+    private let externalAppBinary = "/Applications/CuaDriver.app/Contents/MacOS/cua-driver"
 
     func status(
         traceID: String = AURATelemetry.makeTraceID(prefix: "cua-status"),
@@ -22,25 +24,25 @@ final class CuaDriverService {
         var accessibilityGranted: Bool?
         var screenRecordingGranted: Bool?
         var isHermesComputerUseEnabled = false
+        var isHermesComputerUseSmokePassed = false
 
         if let preferredExecutablePath {
             let command = shellQuoted(preferredExecutablePath)
             async let versionResult = runShell("\(command) --version", traceID: traceID, telemetryEnabled: telemetryEnabled)
-            async let daemonResult = runShell("\(command) status", traceID: traceID, telemetryEnabled: telemetryEnabled)
             async let hermesToolResult = testProjectHermesComputerUse(traceID: traceID, telemetryEnabled: telemetryEnabled)
 
             let resolvedVersion = await versionResult
-            let resolvedDaemon = await daemonResult
 
             version = resolvedVersion.combinedOutput.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
-            daemonStatus = resolvedDaemon.combinedOutput.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty ?? "Unknown"
-
-            if CuaDriverStatus.isDaemonRunning(statusText: daemonStatus) {
-                let resolvedPermissions = await checkPermissions(for: preferredExecutablePath, prompt: false, traceID: traceID, telemetryEnabled: telemetryEnabled)
-                accessibilityGranted = Self.permissionValue(named: "accessibility", in: resolvedPermissions.combinedOutput)
-                screenRecordingGranted = Self.permissionValue(named: "screen recording", in: resolvedPermissions.combinedOutput)
-            }
+            daemonStatus = localDaemonStatus()
+            accessibilityGranted = AXIsProcessTrusted()
+            screenRecordingGranted = CGPreflightScreenCaptureAccess()
             isHermesComputerUseEnabled = await hermesToolResult
+            if accessibilityGranted == true,
+               screenRecordingGranted == true,
+               isHermesComputerUseEnabled {
+                isHermesComputerUseSmokePassed = await smokeTestHermesComputerUse(traceID: traceID, telemetryEnabled: telemetryEnabled)
+            }
         }
 
         let status = CuaDriverStatus(
@@ -50,6 +52,7 @@ final class CuaDriverService {
             accessibilityGranted: accessibilityGranted,
             screenRecordingGranted: screenRecordingGranted,
             isHermesComputerUseEnabled: isHermesComputerUseEnabled,
+            isHermesComputerUseSmokePassed: isHermesComputerUseSmokePassed,
             lastCheckedAt: Date()
         )
 
@@ -64,6 +67,7 @@ final class CuaDriverService {
                     .bool("daemon_running", status.daemonRunning),
                     .bool("permissions_ready", status.permissionsReady),
                     .bool("computer_use_enabled", status.isHermesComputerUseEnabled),
+                    .bool("computer_use_smoke_passed", status.isHermesComputerUseSmokePassed),
                     .int("issue_count", status.issues.count)
                 ]
             )
@@ -102,7 +106,7 @@ final class CuaDriverService {
         var currentStatus = await status(traceID: traceID)
 
         guard currentStatus.isInstalled else {
-            await progress("Cua Driver is not installed. Install it before host-control missions.")
+            await progress("AURA host-control support is not installed. Run setup before host-control missions.")
             AURATelemetry.warning(
                 .cuaDaemonStartBlocked,
                 category: .cua,
@@ -117,7 +121,7 @@ final class CuaDriverService {
         }
 
         guard !currentStatus.daemonRunning else {
-            await progress("Cua Driver daemon is already running.")
+            await progress("AURA host-control helper is already running.")
             AURATelemetry.info(
                 .cuaDaemonStartSkipped,
                 category: .cua,
@@ -131,7 +135,7 @@ final class CuaDriverService {
             return currentStatus
         }
 
-        await progress("Starting Cua Driver daemon through CuaDriver.app...")
+        await progress("Starting AURA host-control helper...")
         let startResult = await startDaemon(for: currentStatus, traceID: traceID)
         AURATelemetry.info(
             .cuaDaemonStartCommandFinish,
@@ -175,7 +179,7 @@ final class CuaDriverService {
         var currentStatus = await status(traceID: traceID)
 
         guard currentStatus.isInstalled else {
-            await progress("Cua Driver is not installed. Install it before requesting macOS permissions.")
+            await progress("AURA host-control support is not installed. Run setup before requesting macOS permissions.")
             AURATelemetry.warning(
                 .cuaPermissionsRequestBlocked,
                 category: .cua,
@@ -189,29 +193,11 @@ final class CuaDriverService {
             return currentStatus
         }
 
-        if !currentStatus.daemonRunning {
-            currentStatus = await startHostControlDaemon(traceID: traceID, progress: progress)
-            guard currentStatus.daemonRunning else {
-                await progress("Cua Driver daemon is not running. Start the daemon before requesting macOS permissions.")
-                AURATelemetry.warning(
-                    .cuaPermissionsRequestBlocked,
-                    category: .cua,
-                    traceID: traceID,
-                    fields: [
-                        .string("reason", "daemon_not_running"),
-                        .int("duration_ms", AURATelemetry.durationMilliseconds(from: startedAt))
-                    ],
-                    audit: .governance
-                )
-                return currentStatus
-            }
-        }
-
         let didAttemptPermissionRequest = !currentStatus.permissionsReady
 
         if didAttemptPermissionRequest {
-            await progress("Requesting Accessibility and Screen Recording permissions...")
-            let requestResult = await requestPermissions(for: currentStatus, prompt: true, traceID: traceID)
+            await progress("Requesting AURA Accessibility and Screen Recording permissions...")
+            let requestResult = await requestPermissions(for: currentStatus, prompt: true, focusing: pane, traceID: traceID)
             AURATelemetry.info(
                 .cuaPermissionsPromptCommandFinish,
                 category: .cua,
@@ -235,27 +221,10 @@ final class CuaDriverService {
             }
         }
 
-        if didAttemptPermissionRequest || currentStatus.permissionsReady {
-            await progress("Restarting CUA daemon so permission changes are picked up...")
-            let restartResult = await restartDaemon(for: currentStatus, traceID: traceID)
-            AURATelemetry.info(
-                .cuaDaemonRestartCommandFinish,
-                category: .cua,
-                traceID: traceID,
-                fields: [
-                    .int32("exit_code", restartResult.exitCode),
-                    .int("duration_ms", restartResult.durationMilliseconds)
-                ],
-                audit: .governance
-            )
-            try? await Task.sleep(nanoseconds: 1_000_000_000)
-            currentStatus = await status(traceID: traceID)
-        }
-
-        if currentStatus.permissionsReady && currentStatus.daemonRunning {
-            await progress("CUA permissions are ready.")
+        if currentStatus.permissionsReady {
+            await progress("AURA host-control permissions are ready.")
         } else {
-            await progress("CUA still needs: \(currentStatus.issues.joined(separator: " "))")
+            await progress("AURA still needs: \(currentStatus.issues.joined(separator: " "))")
         }
 
         AURATelemetry.info(
@@ -273,24 +242,20 @@ final class CuaDriverService {
     }
 
     func recommendedCuaDriverCommandPath(for status: CuaDriverStatus) -> String? {
-        if FileManager.default.isExecutableFile(atPath: appBinary) {
-            return appBinary
+        if let preferredExecutablePath = preferredExecutablePath() {
+            return preferredExecutablePath
         }
 
         return nil
     }
 
     private func startDaemon(for status: CuaDriverStatus, traceID: String) async -> ShellCommandResult {
-        if FileManager.default.fileExists(atPath: appBundle) {
-            return await runShell("open -n -g \(shellQuoted(appBundle)) --args serve", traceID: traceID)
-        }
-
         guard let commandPath = recommendedCuaDriverCommandPath(for: status) else {
             let now = Date()
             return ShellCommandResult(
-                command: "start cua-driver daemon",
+                command: "start AURA host-control helper",
                 output: "",
-                errorOutput: "Cua Driver executable is missing.",
+                errorOutput: "AURA host-control helper is missing.",
                 exitCode: 1,
                 startedAt: now,
                 finishedAt: now,
@@ -298,20 +263,82 @@ final class CuaDriverService {
             )
         }
 
-        return await runShell("\(shellQuoted(commandPath)) serve >/dev/null 2>&1 &", traceID: traceID)
+        return await launchDaemonProcess(commandPath: commandPath, traceID: traceID)
     }
 
     private func restartDaemon(for status: CuaDriverStatus, traceID: String) async -> ShellCommandResult {
+        if let commandPath = recommendedCuaDriverCommandPath(for: status) {
+            _ = await runShell("\(shellQuoted(commandPath)) stop", traceID: traceID)
+        }
         return await startDaemon(for: status, traceID: traceID)
     }
 
-    private func requestPermissions(for status: CuaDriverStatus, prompt: Bool, traceID: String) async -> ShellCommandResult {
+    private func launchDaemonProcess(commandPath: String, traceID: String) async -> ShellCommandResult {
+        let startedAt = Date()
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: commandPath)
+        process.arguments = ["serve"]
+        process.environment = ProcessInfo.processInfo.environment.merging([
+            "AURA_APP_SESSION_ID": AURATelemetry.appSessionID,
+            "AURA_PARENT_PID": "\(AURATelemetry.processID)",
+            "AURA_PROCESS_KIND": "cua-helper",
+            "AURA_TRACE_ID": traceID,
+            "AURA_AUDIT_LEDGER_PATH": AURAAuditLedger.shared.ledgerURL.path
+        ]) { _, new in new }
+
+        let nullOutput = FileHandle(forWritingAtPath: "/dev/null")
+        process.standardOutput = nullOutput
+        process.standardError = nullOutput
+
+        do {
+            try process.run()
+            try? await Task.sleep(nanoseconds: 250_000_000)
+
+            let exitCode: Int32
+            let errorOutput: String
+            if process.isRunning {
+                exitCode = 0
+                errorOutput = ""
+            } else {
+                process.waitUntilExit()
+                exitCode = process.terminationStatus
+                errorOutput = "AURA host-control helper exited immediately."
+            }
+
+            return ShellCommandResult(
+                command: "\(commandPath) serve",
+                output: "",
+                errorOutput: errorOutput,
+                exitCode: exitCode,
+                startedAt: startedAt,
+                finishedAt: Date(),
+                traceID: traceID
+            )
+        } catch {
+            return ShellCommandResult(
+                command: "\(commandPath) serve",
+                output: "",
+                errorOutput: error.localizedDescription,
+                exitCode: 1,
+                startedAt: startedAt,
+                finishedAt: Date(),
+                traceID: traceID
+            )
+        }
+    }
+
+    private func requestPermissions(
+        for status: CuaDriverStatus,
+        prompt: Bool,
+        focusing pane: CuaPermissionPane?,
+        traceID: String
+    ) async -> ShellCommandResult {
         guard let commandPath = recommendedCuaDriverCommandPath(for: status) else {
             let now = Date()
             return ShellCommandResult(
-                command: "cua-driver call check_permissions",
+                command: "AURA host-control helper call check_permissions",
                 output: "",
-                errorOutput: "Cua Driver executable is missing.",
+                errorOutput: "AURA host-control helper is missing.",
                 exitCode: 1,
                 startedAt: now,
                 finishedAt: now,
@@ -320,7 +347,10 @@ final class CuaDriverService {
         }
 
         if prompt {
-            return await launchPermissionPromptThroughApp(traceID: traceID)
+            await MainActor.run {
+                requestAuraHostControlPermissions(focusing: pane)
+            }
+            return auraPermissionResult(command: "AURA privacy prompt", traceID: traceID)
         }
 
         return await checkPermissions(for: commandPath, prompt: prompt, traceID: traceID)
@@ -332,17 +362,28 @@ final class CuaDriverService {
         traceID: String,
         telemetryEnabled: Bool = true
     ) async -> ShellCommandResult {
-        let payload = prompt ? #"{"prompt":true}"# : #"{"prompt":false}"#
-        return await runShell(
-            "\(shellQuoted(commandPath)) call check_permissions \(shellQuoted(payload))",
-            traceID: traceID,
-            telemetryEnabled: telemetryEnabled
-        )
+        if prompt {
+            await MainActor.run {
+                requestAuraHostControlPermissions(focusing: nil)
+            }
+        }
+
+        return auraPermissionResult(command: "AURA privacy preflight", traceID: traceID)
     }
 
-    private func launchPermissionPromptThroughApp(traceID: String) async -> ShellCommandResult {
-        let payload = #"{"prompt":true}"#
-        return await runShell("open -n \(shellQuoted(appBundle)) --args call check_permissions \(shellQuoted(payload))", traceID: traceID)
+    private func auraPermissionResult(command: String, traceID: String) -> ShellCommandResult {
+        let now = Date()
+        let accessibility = AXIsProcessTrusted() ? "granted" : "not granted"
+        let screenRecording = CGPreflightScreenCaptureAccess() ? "granted" : "not granted"
+        return ShellCommandResult(
+            command: command,
+            output: "Accessibility: \(accessibility)\nScreen Recording: \(screenRecording)\n",
+            errorOutput: "",
+            exitCode: accessibility == "granted" && screenRecording == "granted" ? 0 : 1,
+            startedAt: now,
+            finishedAt: now,
+            traceID: traceID
+        )
     }
 
     @MainActor
@@ -382,6 +423,25 @@ final class CuaDriverService {
     private func openSystemSettingsPane(_ urlString: String) {
         guard let url = URL(string: urlString) else { return }
         NSWorkspace.shared.open(url)
+    }
+
+    @MainActor
+    private func requestAuraHostControlPermissions(focusing pane: CuaPermissionPane?) {
+        switch pane {
+        case .accessibility:
+            requestAuraAccessibilityPermission()
+        case .screenRecording:
+            _ = CGRequestScreenCaptureAccess()
+        case .none:
+            requestAuraAccessibilityPermission()
+            _ = CGRequestScreenCaptureAccess()
+        }
+    }
+
+    private func requestAuraAccessibilityPermission() {
+        let promptOption = kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String
+        let accessibilityOptions = [promptOption: true] as CFDictionary
+        _ = AXIsProcessTrustedWithOptions(accessibilityOptions)
     }
 
     private func runShell(
@@ -532,12 +592,58 @@ final class CuaDriverService {
 
     private func preferredExecutablePath() -> String? {
         let fileManager = FileManager.default
-        return fileManager.isExecutableFile(atPath: appBinary) ? appBinary : nil
+
+        if let environmentPath = ProcessInfo.processInfo.environment["HERMES_CUA_DRIVER_CMD"],
+           fileManager.isExecutableFile(atPath: environmentPath) {
+            return environmentPath
+        }
+
+        if let bundledPath = bundledHelperPath(),
+           fileManager.isExecutableFile(atPath: bundledPath) {
+            return bundledPath
+        }
+
+        return fileManager.isExecutableFile(atPath: externalAppBinary) ? externalAppBinary : nil
+    }
+
+    private func bundledHelperPath() -> String? {
+        guard let executableURL = Bundle.main.executableURL else { return nil }
+        return executableURL
+            .deletingLastPathComponent()
+            .appendingPathComponent(helperName)
+            .path
+    }
+
+    private func localDaemonStatus() -> String {
+        let cacheURL = FileManager.default
+            .homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/Caches/cua-driver")
+        let pidURL = cacheURL.appendingPathComponent("cua-driver.pid")
+        let socketURL = cacheURL.appendingPathComponent("cua-driver.sock")
+
+        guard FileManager.default.fileExists(atPath: socketURL.path),
+              let pidText = try? String(contentsOf: pidURL, encoding: .utf8)
+                .trimmingCharacters(in: .whitespacesAndNewlines),
+              let pid = pid_t(pidText),
+              kill(pid, 0) == 0 else {
+            return "AURA host-control helper is not running"
+        }
+
+        return "AURA host-control helper is running"
     }
 
     private func shellQuoted(_ value: String) -> String {
         "'\(value.replacingOccurrences(of: "'", with: "'\\''"))'"
     }
+
+    static let hermesComputerUseSmokePrompt = """
+    This is a read-only AURA host-control startup smoke test.
+    Use the computer_use tool exactly twice:
+    1. action=list_apps
+    2. action=capture, mode=ax, app=AURA
+    Do not click or type. Do not use any other tool.
+    Reply exactly OK if both tool calls succeeded. Otherwise reply FAIL plus the exact error.
+    """
 
     private func testProjectHermesComputerUse(traceID: String, telemetryEnabled: Bool) async -> Bool {
         let wrapperPath = AURAPaths.projectRoot
@@ -555,6 +661,30 @@ final class CuaDriverService {
         )
         let output = result.combinedOutput.lowercased()
         return result.succeeded && Self.hermesComputerUseEnabled(in: output)
+    }
+
+    private func smokeTestHermesComputerUse(traceID: String, telemetryEnabled: Bool) async -> Bool {
+        let wrapperPath = AURAPaths.projectRoot
+            .appendingPathComponent("script/aura-hermes")
+            .path
+        guard FileManager.default.isExecutableFile(atPath: wrapperPath) else {
+            return false
+        }
+
+        let result = await runShell(
+            "\(shellQuoted(wrapperPath)) chat -Q --yolo --source aura-cua-preflight --toolsets computer_use --max-turns 10 -q \(shellQuoted(Self.hermesComputerUseSmokePrompt))",
+            timeout: 45,
+            traceID: traceID,
+            telemetryEnabled: telemetryEnabled
+        )
+        let normalized = result.combinedOutput
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        return result.succeeded
+            && normalized.contains("ok")
+            && !normalized.contains("fail")
+            && !normalized.contains("unknown tool")
+            && !normalized.contains("error")
     }
 
     static func hermesComputerUseEnabled(in toolsListOutput: String) -> Bool {

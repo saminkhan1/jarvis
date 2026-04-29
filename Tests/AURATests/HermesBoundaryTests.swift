@@ -2,6 +2,44 @@ import XCTest
 @testable import AURA
 
 final class HermesBoundaryTests: XCTestCase {
+    func testBuildScriptUsesStableLocalSigningIdentityAndDeclaresMacBrokerPermissions() throws {
+        let script = try String(contentsOfFile: "script/build_and_run.sh")
+
+        XCTAssertFalse(script.contains("codesign --force --sign -"))
+        XCTAssertTrue(script.contains("AURA Local Development"), script)
+        XCTAssertTrue(script.contains("NSRemindersUsageDescription"), script)
+        XCTAssertTrue(script.contains("NSCalendarsUsageDescription"), script)
+        XCTAssertTrue(script.contains("NSContactsUsageDescription"), script)
+        XCTAssertTrue(script.contains("NSAppleEventsUsageDescription"), script)
+        XCTAssertTrue(script.contains("CUA_HELPER_NAME=\"cua-driver\""), script)
+        XCTAssertTrue(script.contains("--identifier \"$BUNDLE_ID\""), script)
+        XCTAssertTrue(script.contains("HERMES_CUA_DRIVER_CMD=$CUA_HELPER_BINARY"), script)
+        XCTAssertTrue(script.contains("com.trycua.cua_driver_daemon"), script)
+        XCTAssertTrue(script.contains("launchctl disable"), script)
+        XCTAssertTrue(script.contains(#"AURA_RESET_TCC_ON_BUILD="${AURA_RESET_TCC_ON_BUILD:-0}""#), script)
+        XCTAssertTrue(script.contains("resets AURA privacy grants, including Microphone"), script)
+    }
+
+    func testAuraHermesWrapperKeepsRealHomeAndOnlyIsolatesHermesHome() throws {
+        let wrapper = try String(contentsOfFile: "script/aura-hermes")
+
+        XCTAssertFalse(wrapper.contains("export HOME=\"$ROOT_DIR/.aura/home\""))
+        XCTAssertTrue(wrapper.contains("NFSHomeDirectory"), wrapper)
+        XCTAssertTrue(wrapper.contains("export HERMES_HOME=\"$ROOT_DIR/.aura/hermes-home\""))
+        XCTAssertTrue(wrapper.contains("HERMES_CUA_DRIVER_CMD"), wrapper)
+        XCTAssertTrue(wrapper.contains("Contents/MacOS/cua-driver"), wrapper)
+    }
+
+    func testHostControlPermissionRequestsCanTargetOnePrivacyPane() throws {
+        let service = try String(contentsOfFile: "Sources/AURA/Services/CuaDriverService.swift")
+
+        XCTAssertTrue(service.contains("requestAuraHostControlPermissions(focusing pane: CuaPermissionPane?)"), service)
+        XCTAssertTrue(service.contains("case .accessibility:"), service)
+        XCTAssertTrue(service.contains("case .screenRecording:"), service)
+        XCTAssertTrue(service.contains("requestAuraAccessibilityPermission()"), service)
+        XCTAssertTrue(service.contains("CGRequestScreenCaptureAccess()"), service)
+    }
+
     func testMergedEnvironmentInjectsAuraMetadataAndPreservesCustomEnvironment() {
         let merged = HermesService.mergedEnvironmentForTesting([
             "FOO": "bar",
@@ -108,6 +146,10 @@ final class HermesBoundaryTests: XCTestCase {
             visibleHostAppName: "Xcode",
             visibleHostBundleIdentifier: "com.apple.dt.Xcode",
             visibleHostProcessIdentifier: 456,
+            topWindowTitle: "Pedroz @ Park.Art 2023 - Pinhais, PR - YouTube",
+            topWindowOwnerName: "Firefox",
+            topWindowBounds: CGRect(x: 10.8, y: 20.2, width: 1440.9, height: 900.1),
+            topWindowIsBrowserLike: true,
             cursorX: 1200.4,
             cursorY: 700.6,
             projectRoot: "/Users/saminkhan1/Documents/jarvis"
@@ -116,6 +158,7 @@ final class HermesBoundaryTests: XCTestCase {
         let data = try XCTUnwrap(snapshot.hermesMetadataJSON.data(using: .utf8))
         let metadata = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
         let cursor = try XCTUnwrap(metadata["cursor"] as? [String: Any])
+        let topWindowBounds = try XCTUnwrap(metadata["top_window_bounds"] as? [String: Any])
 
         XCTAssertEqual(metadata["active_app"] as? String, "Finder")
         XCTAssertEqual(metadata["bundle_id"] as? String, "com.apple.finder")
@@ -123,6 +166,14 @@ final class HermesBoundaryTests: XCTestCase {
         XCTAssertEqual(metadata["top_visible_host_app"] as? String, "Xcode")
         XCTAssertEqual(metadata["top_visible_host_bundle_id"] as? String, "com.apple.dt.Xcode")
         XCTAssertEqual(metadata["top_visible_host_pid"] as? Int, 456)
+        XCTAssertEqual(metadata["top_window_title"] as? String, "Pedroz @ Park.Art 2023 - Pinhais, PR - YouTube")
+        XCTAssertEqual(metadata["top_window_owner_name"] as? String, "Firefox")
+        XCTAssertEqual(metadata["top_window_is_browser_like"] as? Bool, true)
+        XCTAssertEqual(metadata["screen_context_hint"] as? String, "Visible window: Firefox — Pedroz @ Park.Art 2023 - Pinhais, PR - YouTube")
+        XCTAssertEqual(topWindowBounds["x"] as? Int, 10)
+        XCTAssertEqual(topWindowBounds["y"] as? Int, 20)
+        XCTAssertEqual(topWindowBounds["width"] as? Int, 1440)
+        XCTAssertEqual(topWindowBounds["height"] as? Int, 900)
         XCTAssertEqual(cursor["x"] as? Int, 1200)
         XCTAssertEqual(cursor["y"] as? Int, 700)
         XCTAssertEqual(metadata["project_root"] as? String, "/Users/saminkhan1/Documents/jarvis")

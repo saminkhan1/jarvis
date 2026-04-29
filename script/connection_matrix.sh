@@ -3,7 +3,14 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 HERMES="$ROOT_DIR/script/aura-hermes"
-CUA_DRIVER="${AURA_CUA_DRIVER:-/Applications/CuaDriver.app/Contents/MacOS/cua-driver}"
+DEFAULT_AURA_CUA_DRIVER="$ROOT_DIR/dist/AURA.app/Contents/MacOS/cua-driver"
+if [[ -n "${AURA_CUA_DRIVER:-}" ]]; then
+  CUA_DRIVER="$AURA_CUA_DRIVER"
+elif [[ -x "$DEFAULT_AURA_CUA_DRIVER" ]]; then
+  CUA_DRIVER="$DEFAULT_AURA_CUA_DRIVER"
+else
+  CUA_DRIVER="/Applications/CuaDriver.app/Contents/MacOS/cua-driver"
+fi
 TMP_DIR="${TMPDIR:-/tmp}/aura-connection-matrix.$$"
 
 cleanup() {

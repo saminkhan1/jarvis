@@ -91,13 +91,35 @@ if [[ ! -x "$HERMES_PYTHON" ]]; then
   exit 127
 fi
 
+real_user_home() {
+  local user_name="${SUDO_USER:-${USER:-}}"
+  if [[ -n "${SUDO_USER:-}" && -n "$user_name" ]]; then
+    local dscl_home
+    dscl_home="$(/usr/bin/dscl . -read "/Users/$user_name" NFSHomeDirectory 2>/dev/null | awk '{print $2; exit}' || true)"
+    if [[ -n "$dscl_home" && -d "$dscl_home" ]]; then
+      printf '%s\n' "$dscl_home"
+      return 0
+    fi
+  fi
+
+  printf '%s\n' "$HOME"
+}
+
+if [[ -z "${HOME:-}" || "${HOME:-}" == "$ROOT_DIR/.aura/home" ]]; then
+  export HOME="$(real_user_home)"
+fi
+
 export AURA_PROJECT_ROOT="$ROOT_DIR"
-export HOME="$ROOT_DIR/.aura/home"
 export HERMES_HOME="$ROOT_DIR/.aura/hermes-home"
 export VIRTUAL_ENV="$HERMES_AGENT_DIR/venv"
 export PATH="$VIRTUAL_ENV/bin:$PATH"
 export PYTHONPATH="$HERMES_AGENT_DIR${PYTHONPATH:+:$PYTHONPATH}"
 export PYTHONNOUSERSITE=1
+
+AURA_CUA_HELPER="$ROOT_DIR/dist/AURA.app/Contents/MacOS/cua-driver"
+if [[ -z "${HERMES_CUA_DRIVER_CMD:-}" && -x "$AURA_CUA_HELPER" ]]; then
+  export HERMES_CUA_DRIVER_CMD="$AURA_CUA_HELPER"
+fi
 
 is_quiet_chat=0
 session_source=""

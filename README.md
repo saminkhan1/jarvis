@@ -1,11 +1,11 @@
 # AURA
 
-AURA is a native macOS ambient assistant shell, not a chatbot. It is the menu bar cockpit that expands a cursor-adjacent composer in place, captures lightweight host context, and routes work to a project-local Hermes runtime plus Cua Driver for host control.
+AURA is a native macOS ambient assistant shell, not a chatbot. It is the menu bar cockpit that expands a cursor-adjacent composer in place, captures lightweight host context, and routes work to a project-local Hermes runtime plus an AURA-signed CUA helper for host control.
 
 - Global hot key: `⌃⌥⌘A`
 - Native shell: SwiftUI + AppKit on macOS 14+
 - Local runtime: Hermes lives under `.aura/` and is invoked only through `script/aura-hermes`
-- Control lane: Cua Driver is required for host interaction; MVP missions run Hermes with `--yolo`
+- Control lane: AURA embeds the CUA driver binary into `dist/AURA.app`; MVP missions run Hermes with `--yolo`
 
 ## MVP Launch Status
 
@@ -33,14 +33,14 @@ Developer ID signed, notarized, stapled, standalone beta build yet.
    `.aura/hermes-home/config.yaml`. The setup script seeds both files from
    checked-in templates only when they are missing.
 
-3. Confirm Cua Driver is installed, daemonized, permissioned, and visible to
-   Hermes:
+3. Build the local app bundle so AURA embeds and signs its host-control helper:
 
    ```bash
-   /Applications/CuaDriver.app/Contents/MacOS/cua-driver status
-   /Applications/CuaDriver.app/Contents/MacOS/cua-driver call check_permissions '{"prompt":false}'
-   ./script/aura-hermes mcp list
+   ./script/build_and_run.sh --verify
    ```
+
+   Grant Accessibility and Screen Recording to AURA when prompted. Do not grant
+   duplicate permissions to `CuaDriver.app` for the AURA dev loop.
 
 4. Run the launch gates:
 
@@ -48,7 +48,6 @@ Developer ID signed, notarized, stapled, standalone beta build yet.
    ./script/aura-hermes doctor
    ./script/connection_matrix.sh
    ./script/e2e_test.sh
-   ./script/build_and_run.sh --verify
    ```
 
 5. Launch AURA:
@@ -83,8 +82,11 @@ Developer ID signed, notarized, stapled, standalone beta build yet.
 
 `./script/build_and_run.sh` builds `dist/AURA.app`, checks that the repo-local
 Hermes runtime exists, and launches the app with `AURA_PROJECT_ROOT` pointing at
-this checkout. Moving `dist/AURA.app` outside the repo is not supported in this
-pass; Developer ID signing and notarization remain release work.
+this checkout. It embeds `/Applications/CuaDriver.app/Contents/MacOS/cua-driver`
+as `dist/AURA.app/Contents/MacOS/cua-driver`, signs that helper with AURA's
+bundle identifier, and disables the upstream CUA LaunchAgent for the dev loop.
+Moving `dist/AURA.app` outside the repo is not supported in this pass; Developer
+ID signing and notarization remain release work.
 
 ## What AURA Does
 

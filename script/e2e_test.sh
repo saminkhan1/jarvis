@@ -161,9 +161,16 @@ section "Logging schema"
 run_capture "$TMP_DIR/logging.txt" "$VERIFY_LOGGING"
 
 section "CUA Driver readiness"
-CUA_DRIVER="/Applications/CuaDriver.app/Contents/MacOS/cua-driver"
+DEFAULT_AURA_CUA_DRIVER="$ROOT_DIR/dist/AURA.app/Contents/MacOS/cua-driver"
+if [[ -n "${AURA_CUA_DRIVER:-}" ]]; then
+  CUA_DRIVER="$AURA_CUA_DRIVER"
+elif [[ -x "$DEFAULT_AURA_CUA_DRIVER" ]]; then
+  CUA_DRIVER="$DEFAULT_AURA_CUA_DRIVER"
+else
+  CUA_DRIVER="/Applications/CuaDriver.app/Contents/MacOS/cua-driver"
+fi
 if [[ ! -x "$CUA_DRIVER" ]]; then
-  printf "Missing canonical Cua Driver binary: %s\n" "$CUA_DRIVER" >&2
+  printf "Missing host-control driver binary: %s\n" "$CUA_DRIVER" >&2
   exit 1
 fi
 
