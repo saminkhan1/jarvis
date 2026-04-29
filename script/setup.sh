@@ -249,12 +249,12 @@ ensure_hermes_venv() {
   fi
 
   if command -v uv >/dev/null 2>&1; then
-    (cd "$HERMES_AGENT_DIR" && uv venv venv --python 3.11)
+    (cd "$HERMES_AGENT_DIR" && uv venv --clear venv --python 3.11)
     if [[ -f "$HERMES_AGENT_DIR/uv.lock" ]]; then
       (cd "$HERMES_AGENT_DIR" && UV_PROJECT_ENVIRONMENT="$HERMES_AGENT_DIR/venv" uv sync --all-extras --locked) \
-        || (cd "$HERMES_AGENT_DIR" && uv pip install -e ".[all]")
+        || (cd "$HERMES_AGENT_DIR" && VIRTUAL_ENV="$HERMES_AGENT_DIR/venv" uv pip install -e ".[all]")
     else
-      (cd "$HERMES_AGENT_DIR" && uv pip install -e ".[all]")
+      (cd "$HERMES_AGENT_DIR" && VIRTUAL_ENV="$HERMES_AGENT_DIR/venv" uv pip install -e ".[all]")
     fi
   else
     local python_cmd
@@ -305,6 +305,35 @@ seed_templates() {
   else
     ok "Preserved existing .aura/hermes-home/.env"
   fi
+}
+
+seed_hermes_builtin_skills() {
+  section "Hermes builtin skills"
+
+  local source_dir="$HERMES_AGENT_DIR/skills"
+  local target_dir="$HERMES_HOME/skills"
+
+  if [[ ! -d "$source_dir" ]]; then
+    if [[ "$CHECK_ONLY" == "1" ]]; then
+      warn "Hermes builtin skills are missing; setup will install them from $HERMES_AGENT_DIR/skills/"
+    else
+      warn "Hermes builtin skills source is missing: $source_dir"
+    fi
+    return
+  fi
+
+  if [[ "$CHECK_ONLY" == "1" ]]; then
+    if [[ -f "$target_dir/apple/apple-notes/SKILL.md" && -f "$target_dir/apple/apple-reminders/SKILL.md" && -f "$target_dir/apple/imessage/SKILL.md" && -f "$target_dir/apple/findmy/SKILL.md" ]]; then
+      ok "Hermes builtin skills are available in project-local home"
+    else
+      warn "Hermes builtin skills are missing from project-local home; setup will copy $HERMES_AGENT_DIR/skills/ to $HERMES_HOME/skills/"
+    fi
+    return
+  fi
+
+  mkdir -p "$target_dir"
+  /usr/bin/rsync -a --ignore-existing "$source_dir/" "$target_dir/"
+  ok "Seeded Hermes builtin skills into project-local home"
 }
 
 configure_hermes_computer_use_config() {
@@ -614,6 +643,7 @@ main() {
   apply_hermes_local_patches
   ensure_hermes_venv
   seed_templates
+  seed_hermes_builtin_skills
   configure_hermes_computer_use_config
   migrate_hermes_voice_config
   check_wrapper

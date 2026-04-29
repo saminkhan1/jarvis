@@ -30,6 +30,41 @@ final class HermesBoundaryTests: XCTestCase {
         XCTAssertTrue(wrapper.contains("Contents/MacOS/cua-driver"), wrapper)
     }
 
+    func testSetupFallbackInstallsHermesIntoProjectLocalVenvWhenAnOuterVirtualEnvIsActive() throws {
+        let setup = try String(contentsOfFile: "script/setup.sh")
+
+        XCTAssertTrue(setup.contains("uv venv --clear venv --python 3.11"), setup)
+        XCTAssertTrue(setup.contains("UV_PROJECT_ENVIRONMENT=\"$HERMES_AGENT_DIR/venv\" uv sync --all-extras --locked"), setup)
+        XCTAssertTrue(setup.contains("VIRTUAL_ENV=\"$HERMES_AGENT_DIR/venv\" uv pip install -e \".[all]\""), setup)
+    }
+
+    func testSetupSeedsHermesBuiltinSkillsIntoProjectLocalHome() throws {
+        let setup = try String(contentsOfFile: "script/setup.sh")
+
+        XCTAssertTrue(setup.contains("seed_hermes_builtin_skills"), setup)
+        XCTAssertTrue(setup.contains("$HERMES_AGENT_DIR/skills/"), setup)
+        XCTAssertTrue(setup.contains("$HERMES_HOME/skills/"), setup)
+    }
+
+    func testE2ETestAllowsFreshHermesHomeWithoutExistingSessions() throws {
+        let e2e = try String(contentsOfFile: "script/e2e_test.sh")
+
+        XCTAssertTrue(e2e.contains("no structured sessions exported yet"), e2e)
+        XCTAssertFalse(e2e.contains("raise SystemExit(\"no structured sessions exported\")"), e2e)
+    }
+
+    func testE2ETestSkipsRealMissionWhenProjectLocalHermesHasNoAuth() throws {
+        let e2e = try String(contentsOfFile: "script/e2e_test.sh")
+
+        XCTAssertTrue(e2e.contains("Real YOLO quiet mission skipped"), e2e)
+        XCTAssertTrue(e2e.contains("No Codex credentials stored"), e2e)
+        XCTAssertTrue(e2e.contains("mission_status=$?"), e2e)
+        XCTAssertTrue(e2e.contains("normalized_mission_output"), e2e)
+        XCTAssertTrue(e2e.contains("expected_no_auth_output"), e2e)
+        XCTAssertTrue(e2e.contains("section \"Audit ledger\""), e2e)
+        XCTAssertFalse(e2e.contains("if [[ \"$status_output\" == *\"No Codex credentials stored\"* ]]; then"), e2e)
+    }
+
     func testHostControlPermissionRequestsCanTargetOnePrivacyPane() throws {
         let service = try String(contentsOfFile: "Sources/AURA/Services/CuaDriverService.swift")
 
