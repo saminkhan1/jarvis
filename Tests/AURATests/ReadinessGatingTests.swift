@@ -16,7 +16,7 @@ final class ReadinessGatingTests: XCTestCase {
         )
     }
 
-    func testMissionStartRequiresReadyInputAndIdleExecutionState() {
+    func testMissionStartRequiresReadyInputAndAllowsRunningMissionSessions() {
         XCTAssertTrue(
             AURAStore.canStartMission(
                 trimmedGoal: "Summarize logs",
@@ -28,7 +28,7 @@ final class ReadinessGatingTests: XCTestCase {
             )
         )
 
-        XCTAssertFalse(
+        XCTAssertTrue(
             AURAStore.canStartMission(
                 trimmedGoal: "Summarize logs",
                 missionStatusRunning: true,

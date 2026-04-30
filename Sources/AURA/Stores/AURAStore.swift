@@ -94,24 +94,22 @@ final class AURAStore: ObservableObject {
     @Published private(set) var isRunningCuaOnboarding = false
     @Published private(set) var cuaOnboardingMessage = "Complete setup before using AURA."
 
-    private let hermesService = HermesService()
+    private let hermesService: HermesService
+    let sessionManager: MissionSessionManager
     private let voiceCaptureService = VoiceCaptureService()
     private lazy var cuaDriverService = CuaDriverService()
     private let cursorSurface = CursorSurfaceController()
     private lazy var globalHotKey = GlobalHotKeyController { [weak self] in
         self?.openMissionInput()
     }
-    private var missionProcess: Process?
     private var voiceMeterTask: Task<Void, Never>?
     private var voiceTranscriptionTask: Task<Void, Never>?
     private var activeVoiceInputID: UUID?
     private var voiceSpeechStartedAt: Date?
     private var voiceLastSpeechAt: Date?
     private var didRunLaunchOnboarding = false
-    private var activeMissionTraceID: String?
-    private var activeMissionID: String?
-    private var activeMissionStartedAt: Date?
-    private var missionOutputChunkCount = 0
+    private var refreshedHermesSessionIDs: Set<String> = []
+    private var appWillTerminateObserver: NSObjectProtocol?
     private var lastHostControlReady: Bool?
     private static let inputModeKey = "AURAMissionInputMode"
     private static let hermesToolSurfaceIdentifier = "hermes_config"
@@ -122,21 +120,28 @@ final class AURAStore: ObservableObject {
     private static let voiceMaxRecordingSeconds: TimeInterval = 120.0
 
     var currentMissionStartedAt: Date? {
-        activeMissionStartedAt
+        sessionManager.selectedSession?.startedAt
+            ?? sessionManager.activeSessions.first?.startedAt
     }
 
-    private var activeMissionIDValue: String {
-        activeMissionID ?? "none"
-    }
-
-    private func missionFields(_ fields: [AURATelemetry.Field] = []) -> [AURATelemetry.Field] {
-        [.string("mission_id", activeMissionIDValue)] + fields
-    }
-
-    init() {
+    init(hermesService: HermesService = HermesService()) {
+        self.hermesService = hermesService
+        self.sessionManager = MissionSessionManager(hermesService: hermesService)
         let storedInputMode = UserDefaults.standard.string(forKey: Self.inputModeKey)
         inputMode = MissionInputMode(rawValue: storedInputMode ?? "") ?? .text
         microphonePermissionStatus = voiceCaptureService.microphonePermissionStatus()
+        sessionManager.onSessionsChanged = { [weak self] in
+            self?.syncLegacyMissionState()
+        }
+        appWillTerminateObserver = NotificationCenter.default.addObserver(
+            forName: NSApplication.willTerminateNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in
+                self?.sessionManager.cancelAllActiveSessions()
+            }
+        }
         AURATelemetry.info(
             .storeInitialized,
             category: .mission,
@@ -149,9 +154,16 @@ final class AURAStore: ObservableObject {
     }
 
     deinit {
+        let sessionManager = sessionManager
+        Task { @MainActor in
+            sessionManager.cancelAllActiveSessions()
+        }
         voiceMeterTask?.cancel()
         voiceTranscriptionTask?.cancel()
         voiceCaptureService.cancelRecording()
+        if let appWillTerminateObserver {
+            NotificationCenter.default.removeObserver(appWillTerminateObserver)
+        }
     }
 
     var canStartMission: Bool {
@@ -167,7 +179,6 @@ final class AURAStore: ObservableObject {
 
     var canToggleVoiceInput: Bool {
         inputMode == .voice
-            && missionStatus != .running
             && !isRunning
             && !isRunningCuaOnboarding
             && !isRequestingMicrophonePermission
@@ -181,10 +192,22 @@ final class AURAStore: ObservableObject {
     }
 
     var canCancelMission: Bool {
-        missionStatus == .running
+        if let selectedSession = sessionManager.selectedSession {
+            return selectedSession.status == .running
+        }
+
+        return sessionManager.activeSessions.count == 1
     }
 
     var canDismissMissionResult: Bool {
+        if let selectedSession = sessionManager.selectedSession {
+            return selectedSession.isFinished
+        }
+
+        if sessionManager.sessions.contains(where: { $0.isFinished }) {
+            return true
+        }
+
         switch missionStatus {
         case .completed, .failed, .cancelled:
             return true
@@ -259,14 +282,13 @@ final class AURAStore: ObservableObject {
 
     static func canStartMission(
         trimmedGoal: String,
-        missionStatusRunning: Bool,
+        missionStatusRunning _: Bool,
         isRunning: Bool,
         isRunningCuaOnboarding: Bool,
         isRequestingMicrophonePermission: Bool,
         isMissionInputReady: Bool
     ) -> Bool {
         !trimmedGoal.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            && !missionStatusRunning
             && !isRunning
             && !isRunningCuaOnboarding
             && !isRequestingMicrophonePermission
@@ -1194,53 +1216,25 @@ final class AURAStore: ObservableObject {
     }
 
     func startMission() async {
-        guard missionStatus != .running else {
-            let traceID = activeMissionTraceID ?? AURATelemetry.makeTraceID(prefix: "mission")
-            AURATelemetry.warning(
-                .missionStartIgnored,
-                category: .mission,
-                traceID: traceID,
-                fields: missionFields([.string("reason", "already_running")]),
-                audit: .mission
-            )
-            return
-        }
-
         let traceID = AURATelemetry.makeTraceID(prefix: "mission")
         let missionID = AURATelemetry.makeSpanID(prefix: "mission")
         let requestedAt = Date()
-        activeMissionTraceID = traceID
-        activeMissionID = missionID
-        activeMissionStartedAt = requestedAt
-        missionOutputChunkCount = 0
-
         let trimmedGoal = missionGoal.trimmingCharacters(in: .whitespacesAndNewlines)
-        AURATelemetry.info(
-            .missionStartRequested,
-            category: .mission,
-            traceID: traceID,
-            fields: missionFields([
-                .string("operation", "invoke_agent"),
-                .string("tool_surface", Self.hermesToolSurfaceIdentifier),
-                .int("goal_chars", trimmedGoal.count)
-            ]),
-            audit: .mission
-        )
 
         guard isMissionInputReady else {
             AURATelemetry.warning(
                 .missionStartBlocked,
                 category: .mission,
                 traceID: traceID,
-                fields: missionFields([
+                fields: [
+                    .string("mission_id", missionID),
                     .string("reason", "input_not_ready"),
                     .string("input_mode", self.inputMode.rawValue),
                     .int("duration_ms", AURATelemetry.durationMilliseconds(from: requestedAt))
-                ]),
+                ],
                 audit: .mission
             )
             blockAmbientEntryPoint()
-            clearActiveMissionTrace()
             return
         }
 
@@ -1249,17 +1243,17 @@ final class AURAStore: ObservableObject {
                 .missionStartBlocked,
                 category: .mission,
                 traceID: traceID,
-                fields: missionFields([
+                fields: [
+                    .string("mission_id", missionID),
                     .string("reason", "empty_goal"),
                     .int("duration_ms", AURATelemetry.durationMilliseconds(from: requestedAt))
-                ]),
+                ],
                 audit: .mission
             )
             missionStatus = .failed
             missionOutput = "Enter a mission goal before starting Hermes."
             lastOutput = missionOutput
             lastUpdated = Date()
-            clearActiveMissionTrace()
             return
         }
 
@@ -1267,75 +1261,78 @@ final class AURAStore: ObservableObject {
         let launchContext = missionContextSnapshot(traceID: traceID)
         contextSnapshot = launchContext
 
-        missionStatus = .running
-        missionOutput = "Starting Hermes...\n"
-        lastCommand = "./script/aura-hermes chat --yolo --source aura -q <aura tagged prompt>"
-        lastOutput = missionOutput
-        lastUpdated = Date()
-
-        do {
-            AURATelemetry.info(
-                .missionLaunchHermes,
-                category: .mission,
-                traceID: traceID,
-                fields: missionFields([
-                    .string("operation", "invoke_agent"),
-                    .string("tool_surface", Self.hermesToolSurfaceIdentifier)
-                ]),
-                audit: .agent
-            )
-            try launchHermes(arguments: Self.hermesChatArguments(
-                query: trimmedGoal,
-                context: launchContext
-            ), environment: Self.hermesEnvironment(
-                missionID: activeMissionID
-            ), traceID: traceID)
-        } catch {
+        guard let session = sessionManager.spawnSession(
+            for: trimmedGoal,
+            context: launchContext,
+            traceID: traceID,
+            missionID: missionID,
+            selectOnStart: false
+        ) else {
             AURATelemetry.error(
                 .missionLaunchFailed,
                 category: .mission,
                 traceID: traceID,
-                fields: missionFields([
-                    .string("error_type", String(describing: type(of: error))),
+                fields: [
+                    .string("mission_id", missionID),
+                    .string("error_type", "empty_session"),
                     .int("duration_ms", AURATelemetry.durationMilliseconds(from: requestedAt))
-                ]),
+                ],
                 audit: .mission
             )
             missionStatus = .failed
-            missionOutput = error.localizedDescription
+            missionOutput = "AURA could not create a Hermes session."
             lastOutput = missionOutput
             lastUpdated = Date()
-            clearActiveMissionTrace()
+            return
         }
+
+        missionGoal = ""
+        if inputMode == .voice {
+            voiceInputState = .idle
+            voiceInputMessage = "Request sent. You can start another anytime."
+            voiceInputLevel = 0
+            voiceInputDuration = 0
+        }
+
+        lastCommand = "./script/aura-hermes chat --yolo --source aura -q <aura tagged prompt>"
+        lastOutput = session.output
+        lastUpdated = Date()
+        syncLegacyMissionState(preferredSession: session)
     }
 
     func cancelMission() {
-        guard let missionProcess, missionStatus == .running else { return }
-        let traceID = activeMissionTraceID ?? AURATelemetry.makeTraceID(prefix: "mission")
-        missionProcess.terminate()
-        self.missionProcess = nil
-        missionStatus = .cancelled
-        AURATelemetry.info(
-            .missionCancelledByUser,
-            category: .mission,
-            traceID: traceID,
-            fields: missionFields([
-                .int32("child_process_id", missionProcess.processIdentifier),
-                .int("duration_ms", self.activeMissionStartedAt.map { AURATelemetry.durationMilliseconds(from: $0) } ?? 0)
-            ]),
-            audit: .mission
-        )
-        appendMissionOutput("\nMission cancelled by user.")
-        clearActiveMissionTrace()
+        if let selectedSession = sessionManager.selectedSession {
+            sessionManager.cancelSession(selectedSession.id)
+            syncLegacyMissionState(preferredSession: selectedSession)
+            return
+        }
+
+        if sessionManager.activeSessions.count == 1,
+           let onlyActiveSession = sessionManager.activeSessions.first {
+            sessionManager.cancelSession(onlyActiveSession.id)
+            syncLegacyMissionState(preferredSession: onlyActiveSession)
+        }
     }
 
     func dismissMissionResult() {
         guard canDismissMissionResult else { return }
+
+        if let selectedSession = sessionManager.selectedSession {
+            sessionManager.removeSession(selectedSession.id)
+            syncLegacyMissionState()
+            return
+        }
+
+        if let finishedSession = sessionManager.sessions.first(where: { $0.isFinished }) {
+            sessionManager.removeSession(finishedSession.id)
+            syncLegacyMissionState()
+            return
+        }
+
         currentHermesSessionID = nil
         missionStatus = .idle
         missionOutput = ""
         lastUpdated = Date()
-        clearActiveMissionTrace()
     }
 
     func copySetupCommand() {
@@ -1457,26 +1454,6 @@ final class AURAStore: ObservableObject {
         isRunning = false
     }
 
-    private func appendMissionOutput(_ chunk: String) {
-        guard !chunk.isEmpty else { return }
-
-        missionOutputChunkCount += 1
-        if let traceID = activeMissionTraceID {
-            AURATelemetry.debug(
-                .missionOutputChunk,
-                category: .mission,
-                traceID: traceID,
-                fields: missionFields([
-                    .int("chunk_index", self.missionOutputChunkCount),
-                    .int("bytes", AURATelemetry.byteCount(chunk))
-                ])
-            )
-        }
-        missionOutput += chunk
-        lastOutput = missionOutput.trimmingCharacters(in: .whitespacesAndNewlines)
-        lastUpdated = Date()
-    }
-
     nonisolated static func hermesChatArguments(query: String, context: ContextSnapshot? = nil) -> [String] {
         var arguments = ["chat", "--yolo", "--source", "aura"]
         arguments.append(contentsOf: ["-q", hermesTaggedQuery(userMessage: query, context: context)])
@@ -1506,109 +1483,32 @@ final class AURAStore: ObservableObject {
             .replacingOccurrences(of: "'", with: "&apos;")
     }
 
-    private static func hermesEnvironment(missionID: String?) -> [String: String] {
-        [
-            "AURA_MISSION_ID": missionID ?? "none"
-        ]
-    }
+    private func syncLegacyMissionState(preferredSession: MissionSession? = nil) {
+        for session in sessionManager.sessions {
+            guard let hermesSessionID = session.hermesSessionID,
+                  !refreshedHermesSessionIDs.contains(hermesSessionID) else { continue }
 
-    private func launchHermes(arguments: [String], environment: [String: String], traceID: String) throws {
-        let process = try hermesService.start(
-            arguments: arguments,
-            environment: environment,
-            traceID: traceID,
-            onOutput: { [weak self] chunk in
-                Task { @MainActor in
-                    self?.appendMissionOutput(chunk)
-                }
-            },
-            onCompletion: { [weak self] result in
-                Task { @MainActor in
-                    self?.finishMission(result)
-                }
-            }
-        )
-        missionProcess = process
-    }
-
-    private func finishMission(_ result: Result<HermesCommandResult, Error>) {
-        missionProcess = nil
-
-        switch result {
-        case .success(let commandResult):
-            let traceID = commandResult.traceID
-            if missionStatus == .cancelled {
-                AURATelemetry.info(
-                    .missionFinishAfterCancel,
-                    category: .mission,
-                    traceID: traceID,
-                    fields: missionFields([
-                        .int32("exit_code", commandResult.exitCode),
-                        .int("hermes_duration_ms", commandResult.durationMilliseconds)
-                    ]),
-                    audit: .mission
-                )
-                clearActiveMissionTrace()
-                return
-            }
-
-            let combinedOutput = commandResult.combinedOutput.trimmingCharacters(in: .whitespacesAndNewlines)
-            let stdoutOutput = commandResult.output.trimmingCharacters(in: .whitespacesAndNewlines)
-            let output = commandResult.succeeded && !stdoutOutput.isEmpty ? stdoutOutput : combinedOutput
-            let parsedSessionID = AURASessionParsing.sessionID(in: combinedOutput)
-            currentHermesSessionID = parsedSessionID ?? currentHermesSessionID
-            if let parsedSessionID {
-                AURATelemetry.info(
-                    .hermesSessionCaptured,
-                    category: .hermes,
-                    traceID: traceID,
-                    fields: missionFields([.string("hermes_session_id", parsedSessionID)]),
-                    audit: .agent
-                )
-            }
+            refreshedHermesSessionIDs.insert(hermesSessionID)
+            currentHermesSessionID = hermesSessionID
             Task { [weak self] in
-                await self?.refreshHermesSessions(traceID: traceID)
+                await self?.refreshHermesSessions(traceID: session.traceID)
             }
-            missionOutput = output.isEmpty ? "Hermes returned no mission output." : output
-            lastOutput = missionOutput
-            lastUpdated = commandResult.finishedAt
-
-            missionStatus = commandResult.succeeded ? .completed : .failed
-            let missionDuration = activeMissionStartedAt.map { AURATelemetry.durationMilliseconds(from: $0, to: commandResult.finishedAt) } ?? commandResult.durationMilliseconds
-            AURATelemetry.info(
-                .missionFinish,
-                category: .mission,
-                traceID: traceID,
-                fields: missionFields([
-                    .string("status", self.missionStatus.title),
-                    .int32("exit_code", commandResult.exitCode),
-                    .int("mission_duration_ms", missionDuration),
-                    .int("hermes_duration_ms", commandResult.durationMilliseconds),
-                    .int("stdout_bytes", commandResult.outputByteCount),
-                    .int("stderr_bytes", commandResult.errorByteCount),
-                    .int("output_chunks", self.missionOutputChunkCount)
-                ]),
-                audit: .mission
-            )
-            clearActiveMissionTrace()
-        case .failure(let error):
-            let traceID = activeMissionTraceID ?? AURATelemetry.makeTraceID(prefix: "mission")
-            missionStatus = .failed
-            missionOutput = error.localizedDescription
-            lastOutput = missionOutput
-            lastUpdated = Date()
-            AURATelemetry.error(
-                .missionFinishFailed,
-                category: .mission,
-                traceID: traceID,
-                fields: missionFields([
-                    .string("error_type", String(describing: type(of: error))),
-                    .int("duration_ms", self.activeMissionStartedAt.map { AURATelemetry.durationMilliseconds(from: $0) } ?? 0)
-                ]),
-                audit: .mission
-            )
-            clearActiveMissionTrace()
         }
+
+        guard let displaySession = preferredSession
+            ?? sessionManager.selectedSession
+            ?? sessionManager.latestSession else {
+            currentHermesSessionID = nil
+            missionStatus = .idle
+            missionOutput = ""
+            return
+        }
+
+        missionStatus = sessionManager.dominantStatus
+        currentHermesSessionID = displaySession.hermesSessionID ?? currentHermesSessionID
+        missionOutput = displaySession.output.isEmpty ? displaySession.status.title : displaySession.output
+        lastOutput = missionOutput.trimmingCharacters(in: .whitespacesAndNewlines)
+        lastUpdated = displaySession.finishedAt ?? Date()
     }
 
     private func blockAmbientEntryPoint() {
@@ -1676,17 +1576,6 @@ final class AURAStore: ObservableObject {
 
     private func updateCursorIndicator() {
         cursorSurface.setVisible(isAmbientEnabled && canOpenAmbientEntryPoint, store: self)
-    }
-
-    private func clearActiveMissionTrace() {
-        activeMissionTraceID = nil
-        activeMissionID = nil
-        activeMissionStartedAt = nil
-        missionOutputChunkCount = 0
-    }
-
-    private static func sessionID(in output: String) -> String? {
-        AURASessionParsing.sessionID(in: output)
     }
 
     private static func decodeVoiceTranscription(from output: String) throws -> VoiceTranscriptionResponse {

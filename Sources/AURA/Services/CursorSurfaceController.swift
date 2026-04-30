@@ -12,8 +12,13 @@ enum CursorSurfaceSizing {
 
 @MainActor
 final class CursorSurfaceController {
-    private static let textComposerPanelSize = NSSize(width: 440, height: 286)
-    private static let voiceComposerPanelSize = NSSize(width: 440, height: 326)
+    private static let textComposerPanelSize = NSSize(width: 260, height: 144)
+    private static let textComposerWithSessionsPanelSize = NSSize(width: 260, height: 176)
+    private static let voiceComposerPanelSize = NSSize(width: 260, height: 112)
+    private static let voiceComposerWithSessionsPanelSize = NSSize(width: 260, height: 144)
+    private static let voiceReadyComposerPanelSize = NSSize(width: 260, height: 184)
+    private static let voiceReadyWithSessionsComposerPanelSize = NSSize(width: 260, height: 216)
+    private static let outputComposerPanelSize = NSSize(width: 260, height: 226)
 
     private var window: CursorSurfaceWindow?
     private weak var store: AURAStore?
@@ -102,6 +107,7 @@ final class CursorSurfaceController {
         panel.contentViewController = NSHostingController(
             rootView: CursorSurfaceView(
                 store: store,
+                sessionManager: store.sessionManager,
                 presentation: presentation,
                 minimizeSurface: { [weak self] in
                     self?.store?.minimizeAmbientSurface()
@@ -170,7 +176,19 @@ final class CursorSurfaceController {
 
     private var panelSize: NSSize {
         if presentation.isComposerOpen {
-            return store?.inputMode == .voice ? Self.voiceComposerPanelSize : Self.textComposerPanelSize
+            if store?.sessionManager.selectedSession != nil {
+                return Self.outputComposerPanelSize
+            }
+
+            let hasSessions = store?.sessionManager.sessions.isEmpty == false
+            if store?.inputMode == .voice {
+                if store?.voiceInputState == .ready {
+                    return hasSessions ? Self.voiceReadyWithSessionsComposerPanelSize : Self.voiceReadyComposerPanelSize
+                }
+                return hasSessions ? Self.voiceComposerWithSessionsPanelSize : Self.voiceComposerPanelSize
+            }
+
+            return hasSessions ? Self.textComposerWithSessionsPanelSize : Self.textComposerPanelSize
         }
 
         let size = CursorSurfaceSizing.compactPanelSize(for: store, visibleFrame: visibleFrameContainingCursor())

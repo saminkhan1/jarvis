@@ -32,6 +32,7 @@ struct AURAApp: App {
         MenuBarExtra("AURA", systemImage: "sparkle.magnifyingglass") {
             MenuBarContentView(store: store)
         }
+        .menuBarExtraStyle(.window)
 
         Settings {
             SettingsView(store: store)

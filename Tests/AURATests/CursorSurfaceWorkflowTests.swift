@@ -15,11 +15,34 @@ final class CursorSurfaceWorkflowTests: XCTestCase {
         )
     }
 
+    func testMissionStartDelegatesToConcurrentSessionManager() throws {
+        let source = try String(contentsOfFile: "Sources/AURA/Stores/AURAStore.swift", encoding: .utf8)
+        guard let startRange = source.range(of: "func startMission() async"),
+              let cancelRange = source.range(of: "func cancelMission()") else {
+            XCTFail("Could not locate mission start source.")
+            return
+        }
+
+        let startSource = String(source[startRange.lowerBound..<cancelRange.lowerBound])
+        XCTAssertTrue(
+            startSource.contains("sessionManager.spawnSession("),
+            "Starting a mission should create an independent MissionSession."
+        )
+        XCTAssertTrue(
+            startSource.contains("missionGoal = \"\""),
+            "Starting a mission should clear the composer for the next request."
+        )
+        XCTAssertFalse(
+            startSource.contains("guard missionStatus != .running"),
+            "A running mission must not block another session from starting."
+        )
+    }
+
     func testCursorSurfaceViewExposesStateSpecificActions() throws {
         let source = try String(contentsOfFile: "Sources/AURA/Views/CursorSurfaceView.swift", encoding: .utf8)
         XCTAssertTrue(
-            source.contains("case .completed, .failed, .cancelled:\n                resultCard"),
-            "CursorSurfaceView should render a dedicated result state after Hermes finishes, fails, or is cancelled."
+            source.contains("sessionOutputBody(session: selectedSession)"),
+            "CursorSurfaceView should render selected session output without replacing the new-request composer."
         )
         XCTAssertTrue(
             source.contains("Button(\"Cancel\""),
@@ -34,8 +57,12 @@ final class CursorSurfaceWorkflowTests: XCTestCase {
             "CursorSurfaceView should expose a Done button to return completed output to idle state."
         )
         XCTAssertTrue(
-            source.contains("store.dismissMissionResult()"),
-            "Done should route through dismissMissionResult()."
+            source.contains("sessionManager.removeSession(selectedSession.id)"),
+            "Done should remove the selected session."
+        )
+        XCTAssertTrue(
+            source.contains("SessionPill"),
+            "CursorSurfaceView should expose session pills for concurrent sessions."
         )
         XCTAssertFalse(
             source.contains("The composer collapses while Hermes works."),
@@ -106,7 +133,7 @@ final class CursorSurfaceWorkflowTests: XCTestCase {
         )
     }
 
-    func testVoiceReadyActionsAreSendAndRedo() throws {
+    func testVoiceReadyActionsAreSendAndRetry() throws {
         let source = try String(contentsOfFile: "Sources/AURA/Views/CursorSurfaceView.swift", encoding: .utf8)
         XCTAssertTrue(
             source.contains("TextEditor(text: $store.missionGoal)"),
@@ -117,12 +144,16 @@ final class CursorSurfaceWorkflowTests: XCTestCase {
             "The ready voice transcript should expose Send."
         )
         XCTAssertTrue(
+            source.contains("Button(\"Retry\")"),
+            "Voice recording and ready states should expose Retry."
+        )
+        XCTAssertFalse(
             source.contains("Button(\"Redo\")"),
-            "Voice recording and ready states should expose Redo."
+            "Voice recording should not use Redo, which conflicts with OS undo/redo meaning."
         )
         XCTAssertTrue(
             source.contains("Task { await store.redoVoiceInput() }"),
-            "Redo should route through the store so it can discard and immediately restart recording."
+            "Retry should route through the store so it can discard and immediately restart recording."
         )
     }
 
@@ -133,8 +164,17 @@ final class CursorSurfaceWorkflowTests: XCTestCase {
             "Text Start visibility should be explicit."
         )
         XCTAssertTrue(
-            source.contains("store.inputMode == .text\n            && store.missionStatus == .idle\n            && store.canStartMission"),
-            "Start should only render for startable idle text input."
+            source.contains("store.inputMode == .text\n            && store.canStartMission"),
+            "Start should render for startable text input even while another session is running."
         )
     }
+
+    func testMenuBarExtraUsesWindowStyleForDataRichCompanionPanel() throws {
+        let source = try String(contentsOfFile: "Sources/AURA/App/AURAApp.swift", encoding: .utf8)
+        XCTAssertTrue(
+            source.contains(".menuBarExtraStyle(.window)"),
+            "AURA's data-rich menu bar companion panel should use SwiftUI MenuBarExtra window style."
+        )
+    }
+
 }

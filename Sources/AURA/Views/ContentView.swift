@@ -258,11 +258,17 @@ private struct DashboardHeader: View {
 
 private struct StatusGrid: View {
     @ObservedObject var store: AURAStore
+    @ObservedObject var sessionManager: MissionSessionManager
+
+    init(store: AURAStore) {
+        self._store = ObservedObject(wrappedValue: store)
+        self._sessionManager = ObservedObject(wrappedValue: store.sessionManager)
+    }
 
     var body: some View {
         LazyVGrid(columns: [GridItem(.adaptive(minimum: 180), spacing: 12)], spacing: 12) {
             StatusTile(title: "Hermes", value: store.healthState.title, systemImage: "bolt.horizontal.circle", color: healthColor)
-            StatusTile(title: "Mission", value: store.missionStatus.title, systemImage: "point.3.connected.trianglepath.dotted", color: missionColor)
+            StatusTile(title: "Sessions", value: sessionManager.statusSummary, systemImage: "point.3.connected.trianglepath.dotted", color: missionColor)
             StatusTile(title: "Input", value: store.inputMode.title, systemImage: store.inputMode.systemImage, color: .secondary)
             StatusTile(title: "Tools", value: store.hermesToolSurfaceTitle, systemImage: store.hermesToolSurfaceSystemImage, color: .secondary)
             StatusTile(title: "CUA", value: store.cuaStatus.title, systemImage: "display.and.arrow.down", color: store.cuaStatus.readyForHostControl ? .green : .orange)
@@ -285,7 +291,7 @@ private struct StatusGrid: View {
     }
 
     private var missionColor: Color {
-        switch store.missionStatus {
+        switch sessionManager.dominantStatus {
         case .idle, .cancelled:
             return .secondary
         case .running:
