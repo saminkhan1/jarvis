@@ -12,12 +12,12 @@ struct ContentView: View {
                 }
                 DashboardHeader(store: store)
                 StatusGrid(store: store)
+                MissionRunnerView(store: store)
+                MissionOutputView(store: store)
+                HermesSessionsCard(store: store)
                 MissionConfigurationCard(store: store)
                 ReadinessCenterView(store: store)
-                MissionRunnerView(store: store)
-                HermesSessionsCard(store: store)
                 HermesControlCard(store: store)
-                MissionOutputView(store: store)
             }
             .padding(24)
             .frame(maxWidth: .infinity, alignment: .topLeading)
@@ -233,15 +233,6 @@ private struct DashboardHeader: View {
             }
 
             Spacer()
-
-            Button {
-                store.openMissionInput()
-            } label: {
-                Label(store.inputMode.actionTitle, systemImage: store.inputMode.systemImage)
-            }
-            .keyboardShortcut("a", modifiers: [.control, .option, .command])
-            .disabled(!store.canOpenAmbientEntryPoint)
-            .accessibilityIdentifier("aura.newMission")
 
             Button {
                 Task { await store.refreshAll() }

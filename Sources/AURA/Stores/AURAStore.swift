@@ -521,7 +521,7 @@ final class AURAStore: ObservableObject {
             stopVoiceInputAndTranscribe()
         case .requestingPermission, .transcribing:
             break
-        case .idle, .ready, .failed:
+        case .idle, .failed:
             Task { await startVoiceInput() }
         }
 
@@ -680,7 +680,7 @@ final class AURAStore: ObservableObject {
         do {
             _ = try voiceCaptureService.startRecording()
             voiceInputState = .recording
-            voiceInputMessage = "Listening. Pause after speaking, or click Stop."
+            voiceInputMessage = "Listening. Pause after speaking to send."
             startVoiceMeter()
             AURATelemetry.info(
                 .voiceInputRecordStart,
@@ -759,10 +759,8 @@ final class AURAStore: ObservableObject {
                 throw VoiceTranscriptionError.failed(detail?.isEmpty == false ? detail! : "No speech was detected.")
             }
 
-            missionGoal = transcript
-            voiceInputState = .ready
-            voiceInputMessage = "Transcript ready. Review or edit before sending."
             activeVoiceInputID = nil
+            missionGoal = transcript
             lastCommand = "./script/aura-hermes aura-transcribe-audio <recording>"
             lastOutput = "Voice transcript captured for the next mission."
             lastUpdated = Date()
@@ -776,6 +774,12 @@ final class AURAStore: ObservableObject {
                 ],
                 audit: .action
             )
+            if inputMode == .voice, canStartMission {
+                await startMission()
+            } else {
+                voiceInputState = .failed
+                voiceInputMessage = "Voice input could not start."
+            }
         } catch {
             try? FileManager.default.removeItem(at: audioURL)
             guard activeVoiceInputID == voiceInputID, !Task.isCancelled else { return }
@@ -926,7 +930,10 @@ final class AURAStore: ObservableObject {
     }
 
     func minimizeAmbientSurface() {
-        cursorSurface.collapseToCompact()
+        if inputMode == .voice {
+            cancelVoiceInput()
+        }
+        cursorSurface.closeBubblePanel()
     }
 
     func refreshCuaStatus(traceID: String = AURATelemetry.makeTraceID(prefix: "cua-refresh")) async {
@@ -1294,7 +1301,7 @@ final class AURAStore: ObservableObject {
             voiceInputDuration = 0
         }
 
-        lastCommand = "./script/aura-hermes chat --yolo --source aura -q <aura tagged prompt>"
+        lastCommand = "./script/aura-hermes chat --quiet --yolo --source aura --query <aura tagged prompt>"
         lastOutput = session.output
         lastUpdated = Date()
         syncLegacyMissionState(preferredSession: session)
@@ -1455,8 +1462,8 @@ final class AURAStore: ObservableObject {
     }
 
     nonisolated static func hermesChatArguments(query: String, context: ContextSnapshot? = nil) -> [String] {
-        var arguments = ["chat", "--yolo", "--source", "aura"]
-        arguments.append(contentsOf: ["-q", hermesTaggedQuery(userMessage: query, context: context)])
+        var arguments = ["chat", "--quiet", "--yolo", "--source", "aura"]
+        arguments.append(contentsOf: ["--query", hermesTaggedQuery(userMessage: query, context: context)])
         return arguments
     }
 

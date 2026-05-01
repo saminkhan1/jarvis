@@ -46,7 +46,7 @@ enum MissionInputMode: String, CaseIterable, Identifiable {
         case .text:
             return "The shortcut opens AURA's text composer."
         case .voice:
-            return "The shortcut opens AURA's voice composer and records a transcript for review."
+            return "The shortcut opens AURA's voice surface, listens, then starts Hermes."
         }
     }
 
@@ -59,14 +59,6 @@ enum MissionInputMode: String, CaseIterable, Identifiable {
         }
     }
 
-    var actionTitle: String {
-        switch self {
-        case .text:
-            return "New Request"
-        case .voice:
-            return "Start Voice Request"
-        }
-    }
 }
 
 enum VoiceInputState: Equatable {
@@ -74,7 +66,6 @@ enum VoiceInputState: Equatable {
     case requestingPermission
     case recording
     case transcribing
-    case ready
     case failed
 
     var title: String {
@@ -87,8 +78,6 @@ enum VoiceInputState: Equatable {
             return "Listening"
         case .transcribing:
             return "Transcribing"
-        case .ready:
-            return "Transcript ready"
         case .failed:
             return "Voice input failed"
         }
@@ -96,7 +85,7 @@ enum VoiceInputState: Equatable {
 
     var systemImage: String {
         switch self {
-        case .idle, .ready:
+        case .idle:
             return "mic.circle"
         case .requestingPermission:
             return "lock.circle"
@@ -113,7 +102,7 @@ enum VoiceInputState: Equatable {
         switch self {
         case .requestingPermission, .recording, .transcribing:
             return true
-        case .idle, .ready, .failed:
+        case .idle, .failed:
             return false
         }
     }

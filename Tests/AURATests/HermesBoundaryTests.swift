@@ -239,7 +239,7 @@ final class HermesBoundaryTests: XCTestCase {
         XCTAssertTrue(payload.hasSuffix("\n</aura_meta>"))
     }
 
-    func testHermesChatArgumentsPassTaggedPromptWithContextAndNoQuietMode() {
+    func testHermesChatArgumentsPassTaggedPromptWithContextAndQuietMode() {
         let query = #"what's in <this> & "that"?"#
         let snapshot = ContextSnapshot(
             capturedAt: Date(timeIntervalSince1970: 1_714_329_939),
@@ -256,12 +256,12 @@ final class HermesBoundaryTests: XCTestCase {
 
         let arguments = AURAStore.hermesChatArguments(query: query, context: snapshot)
 
-        XCTAssertEqual(Array(arguments.prefix(5)), ["chat", "--yolo", "--source", "aura", "-q"])
+        XCTAssertEqual(Array(arguments.prefix(6)), ["chat", "--quiet", "--yolo", "--source", "aura", "--query"])
         XCTAssertFalse(arguments.contains("-Q"))
-        XCTAssertFalse(arguments.contains("--quiet"))
-        XCTAssertEqual(arguments.count, 6)
+        XCTAssertTrue(arguments.contains("--quiet"))
+        XCTAssertEqual(arguments.count, 7)
 
-        let payload = arguments[5]
+        let payload = arguments[6]
         XCTAssertTrue(payload.hasPrefix(#"<user_message source="aura">what&apos;s in &lt;this&gt; &amp; &quot;that&quot;?</user_message>"#))
         XCTAssertTrue(payload.contains(#"<aura_meta type="context_snapshot" version="1">"#))
         XCTAssertTrue(payload.contains(#""active_app" : "Finder""#))

@@ -47,25 +47,18 @@ struct MissionRunnerView: View {
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(.secondary)
 
-            HStack {
-                Button {
-                    store.openMissionInput()
-                } label: {
-                    Label(store.inputMode.actionTitle, systemImage: store.inputMode.systemImage)
-                }
-                .keyboardShortcut("a", modifiers: [.control, .option, .command])
-                .disabled(!store.canOpenAmbientEntryPoint)
-                .accessibilityIdentifier("aura.openPanel")
-
-                Spacer()
-
-                if store.canDismissMissionResult {
+            if store.canDismissMissionResult {
+                HStack {
+                    Spacer()
                     Button {
                         store.dismissMissionResult()
                     } label: {
                         Label("Done", systemImage: "checkmark.circle")
                     }
-                } else if sessionManager.hasActiveSessions {
+                }
+            } else if sessionManager.hasActiveSessions {
+                HStack {
+                    Spacer()
                     Button(role: .cancel) {
                         sessionManager.cancelAllActiveSessions()
                     } label: {

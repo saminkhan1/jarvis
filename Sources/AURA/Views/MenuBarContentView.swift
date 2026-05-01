@@ -27,7 +27,7 @@ struct MenuBarContentView: View {
                 .padding(.horizontal, 16)
                 .padding(.top, 14)
 
-            if !store.cuaStatus.readyForHostControl {
+            if shouldShowSetupSection {
                 setupSection
                     .padding(.horizontal, 16)
                     .padding(.top, 14)
@@ -72,22 +72,10 @@ struct MenuBarContentView: View {
     }
 
     private var primaryAction: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Button {
-                store.openMissionInput()
-            } label: {
-                Label(store.inputMode.actionTitle, systemImage: store.inputMode.systemImage)
-                    .frame(maxWidth: .infinity)
-            }
-            .buttonStyle(AURAPrimaryButtonStyle())
-            .keyboardShortcut("a", modifiers: [.control, .option, .command])
-            .disabled(!store.canOpenAmbientEntryPoint)
-
-            Text(primaryHint)
-                .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(AURAVisualStyle.Colors.textTertiary)
-                .lineLimit(2)
-        }
+        Text(primaryHint)
+            .font(.system(size: 11, weight: .medium))
+            .foregroundStyle(AURAVisualStyle.Colors.textTertiary)
+            .lineLimit(2)
     }
 
     private var statusSection: some View {
@@ -112,22 +100,36 @@ struct MenuBarContentView: View {
                 .font(.system(size: 10, weight: .semibold, design: .rounded))
                 .foregroundStyle(AURAVisualStyle.Colors.textTertiary)
 
-            Text("Finish host-control setup to let Hermes inspect and operate macOS through AURA.")
+            Text(setupCopy)
                 .font(.system(size: 11, weight: .medium))
                 .foregroundStyle(AURAVisualStyle.Colors.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
 
             HStack(spacing: 8) {
-                Button("Open Setup") {
-                    openMainWindow()
+                if shouldShowMicrophoneAction {
+                    Button(store.microphonePermissionActionTitle ?? "Grant") {
+                        Task { await store.handleMicrophonePermissionAction() }
+                    }
+                    .buttonStyle(AURASecondaryButtonStyle(compact: true))
+                    .disabled(store.isRequestingMicrophonePermission)
+                } else {
+                    Button("Open Setup") {
+                        openMainWindow()
+                    }
+                    .buttonStyle(AURASecondaryButtonStyle(compact: true))
                 }
-                .buttonStyle(AURASecondaryButtonStyle(compact: true))
 
                 Button("Refresh") {
-                    Task { await store.refreshCuaStatus() }
+                    Task {
+                        if store.inputMode == .voice {
+                            await store.refreshPermissionStatus()
+                        } else {
+                            await store.refreshCuaStatus()
+                        }
+                    }
                 }
                 .buttonStyle(AURASecondaryButtonStyle(compact: true))
-                .disabled(store.isCheckingCua)
+                .disabled(store.isCheckingCua || store.isRequestingMicrophonePermission)
             }
         }
         .padding(12)
@@ -152,8 +154,7 @@ struct MenuBarContentView: View {
                 .buttonStyle(AURASecondaryButtonStyle(compact: true))
                 .disabled(store.isRunning)
 
-                Toggle("", isOn: $store.isAmbientEnabled)
-                    .labelsHidden()
+                Toggle("Cursor", isOn: $store.isAmbientEnabled)
                     .toggleStyle(.switch)
                     .controlSize(.mini)
             }
@@ -215,12 +216,36 @@ struct MenuBarContentView: View {
     }
 
     private var primaryHint: String {
+        if !store.canOpenAmbientEntryPoint {
+            return setupCopy
+        }
+
         switch store.inputMode {
         case .text:
-            return "Open the cursor surface and type a mission."
+            return "Press ⌃⌥⌘A to type a mission in the cursor surface."
         case .voice:
-            return "Open the cursor surface and speak to AURA."
+            return "Press ⌃⌥⌘A to speak a mission to AURA."
         }
+    }
+
+    private var shouldShowSetupSection: Bool {
+        !store.cuaStatus.readyForHostControl || !store.canOpenAmbientEntryPoint
+    }
+
+    private var shouldShowMicrophoneAction: Bool {
+        store.inputMode == .voice && !store.microphonePermissionStatus.isGranted
+    }
+
+    private var setupCopy: String {
+        if shouldShowMicrophoneAction {
+            return store.microphonePermissionStatus.setupDetail
+        }
+
+        if !store.canOpenAmbientEntryPoint {
+            return "Finish setup before opening the cursor surface."
+        }
+
+        return "Finish host-control setup to let Hermes inspect and operate macOS through AURA."
     }
 
     private var statusDotColor: Color {
@@ -287,7 +312,8 @@ private struct MenuBarStatusRow: View {
             Text(title.uppercased())
                 .font(.system(size: 10, weight: .semibold, design: .rounded))
                 .foregroundStyle(AURAVisualStyle.Colors.textTertiary)
-                .frame(width: 48, alignment: .leading)
+                .frame(width: 56, alignment: .leading)
+                .lineLimit(1)
 
             Text(value)
                 .font(.system(size: 12, weight: .medium))

@@ -16,12 +16,6 @@ struct AURAApp: App {
         }
         .commands {
             CommandGroup(after: .appInfo) {
-                Button(store.inputMode.actionTitle) {
-                    store.openMissionInput()
-                }
-                .keyboardShortcut("a", modifiers: [.control, .option, .command])
-                .disabled(!store.canOpenAmbientEntryPoint)
-
                 Button("Refresh Hermes Status") {
                     Task { await store.refreshAll() }
                 }

@@ -13,6 +13,10 @@ final class CursorSurfaceWorkflowTests: XCTestCase {
             lifecycleSource.contains("cursorSurface.collapseToCompact()"),
             "AURAStore should not auto-collapse the cursor surface during mission start, cancel, or completion."
         )
+        XCTAssertFalse(
+            lifecycleSource.contains("cursorSurface.closeBubblePanel()"),
+            "AURAStore should not auto-close the cursor bubble during mission start, cancel, or completion."
+        )
     }
 
     func testMissionStartDelegatesToConcurrentSessionManager() throws {
@@ -38,59 +42,179 @@ final class CursorSurfaceWorkflowTests: XCTestCase {
         )
     }
 
-    func testCursorSurfaceViewExposesStateSpecificActions() throws {
+    func testCursorSurfaceViewUsesClickyBubbleInputAndOutput() throws {
         let source = try String(contentsOfFile: "Sources/AURA/Views/CursorSurfaceView.swift", encoding: .utf8)
         XCTAssertTrue(
-            source.contains("sessionOutputBody(session: selectedSession)"),
-            "CursorSurfaceView should render selected session output without replacing the new-request composer."
+            source.contains("sessionBubble(session)"),
+            "CursorSurfaceView should render mission state through the Clicky-style cursor bubble."
         )
         XCTAssertTrue(
-            source.contains("Button(\"Cancel\""),
-            "CursorSurfaceView should expose a Cancel button while Hermes is running."
+            source.contains("Text(\"...\")"),
+            "CursorSurfaceView should use Clicky's ellipsis placeholder."
         )
         XCTAssertTrue(
-            source.contains("accessibilityLabel(\"Minimize AURA\")"),
-            "CursorSurfaceView should expose an Escape-wired minimize control."
+            source.contains("Working on"),
+            "Running missions should acknowledge the submitted request instead of returning to an empty composer."
         )
         XCTAssertTrue(
-            source.contains("Button(\"Done\")"),
-            "CursorSurfaceView should expose a Done button to return completed output to idle state."
+            source.contains("accessibilityLabel(\"Cancel running request\")"),
+            "Running missions should expose a compact cancel affordance in the cursor bubble."
         )
         XCTAssertTrue(
-            source.contains("sessionManager.removeSession(selectedSession.id)"),
-            "Done should remove the selected session."
+            source.contains("arrow.up.circle.fill"),
+            "Text input should expose a visible Clicky-style send affordance."
         )
         XCTAssertTrue(
+            source.contains("ClickyBubbleBackground"),
+            "CursorSurfaceView should use Clicky's rounded response-bubble background."
+        )
+        XCTAssertTrue(
+            source.contains("ScrollView(.vertical)"),
+            "Mission output should be scrollable inside the cursor bubble."
+        )
+        XCTAssertTrue(
+            source.contains(".textSelection(.enabled)"),
+            "Mission output text should be selectable."
+        )
+        XCTAssertTrue(
+            source.contains(".onExitCommand(perform: minimizeSurface)"),
+            "CursorSurfaceView should keep Escape wired to collapse the bubble."
+        )
+        XCTAssertFalse(
             source.contains("SessionPill"),
-            "CursorSurfaceView should expose session pills for concurrent sessions."
+            "The cursor surface should not keep the legacy session-strip UI."
         )
         XCTAssertFalse(
-            source.contains("The composer collapses while Hermes works."),
-            "CursorSurfaceView should not claim that the composer auto-collapses anymore."
+            source.contains("Button(\"Cancel\""),
+            "The Clicky-style output bubble should not keep legacy cursor-surface action buttons."
         )
         XCTAssertFalse(
-            source.contains("Close AURA cursor surface"),
-            "CursorSurfaceView should not expose a second close/hide concept."
+            source.contains("Button(\"Done\""),
+            "The Clicky-style output bubble should not keep legacy cursor-surface action buttons."
         )
         XCTAssertFalse(
-            source.contains("compactActionButtons"),
-            "The minimized cursor surface should stay passive and button-free."
+            source.contains("AURAVisualStyle"),
+            "The cursor surface should use Clicky's local bubble styling, not the old Aura card styling."
         )
     }
 
-    func testCompactCursorSurfaceIsPassiveForEveryState() throws {
+    func testCursorSurfaceControllerHasNoLegacyCompactPanel() throws {
         let source = try String(contentsOfFile: "Sources/AURA/Services/CursorSurfaceController.swift", encoding: .utf8)
         XCTAssertTrue(
-            source.contains("private var shouldIgnoreMouseEvents: Bool {\n        !presentation.isComposerOpen\n    }"),
-            "Minimized panels should ignore mouse events in every state."
+            source.contains("private var bubbleAnchorTopLeft: NSPoint?"),
+            "The cursor bubble should pin to an opening anchor instead of chasing the mouse."
         )
         XCTAssertTrue(
-            source.contains("private var shouldTrackCompactPanel: Bool {\n        !presentation.isComposerOpen\n    }"),
-            "Minimized panels should keep following the cursor in every state."
+            source.contains("cursor.x + 22"),
+            "The cursor bubble should still open with Clicky's response-overlay horizontal cursor offset."
+        )
+        XCTAssertTrue(
+            source.contains("cursor.y - 6 - size.height"),
+            "The cursor bubble should still open with Clicky's response-overlay vertical cursor offset."
+        )
+        XCTAssertTrue(
+            source.contains("window.ignoresMouseEvents = false"),
+            "The cursor bubble must receive mouse events so users can scroll, select text, and press controls."
+        )
+        XCTAssertTrue(
+            source.contains("hideCursorOverlay()"),
+            "The decorative cursor overlay should be hidden while an interactive bubble is open."
         )
         XCTAssertFalse(
-            source.contains("usesInteractiveCompactPanel"),
-            "The compact surface should not have actionable minimized states."
+            source.contains("panelTrackingTimer"),
+            "The interactive cursor bubble should not keep a timer that follows the mouse."
+        )
+        XCTAssertFalse(
+            source.contains("shouldIgnoreBubbleMouseEvents"),
+            "Finished output must not ignore mouse events."
+        )
+        XCTAssertFalse(
+            source.contains("CursorSurfaceSizing"),
+            "The legacy compact badge sizing helper should be removed."
+        )
+        XCTAssertFalse(
+            source.contains("compactPanelSize"),
+            "The legacy compact badge size state should be removed."
+        )
+        XCTAssertFalse(
+            source.contains("updateCompactTracking"),
+            "The old compact-panel tracking path should be removed."
+        )
+    }
+
+    func testCursorSurfaceEscapeIsHandledAtPanelLevel() throws {
+        let controllerSource = try String(contentsOfFile: "Sources/AURA/Services/CursorSurfaceController.swift", encoding: .utf8)
+        let storeSource = try String(contentsOfFile: "Sources/AURA/Stores/AURAStore.swift", encoding: .utf8)
+
+        XCTAssertTrue(
+            controllerSource.contains("private var escapeKeyMonitor: Any?"),
+            "Escape dismissal should not depend only on SwiftUI's onExitCommand."
+        )
+        XCTAssertTrue(
+            controllerSource.contains("NSEvent.addLocalMonitorForEvents(matching: .keyDown)"),
+            "The cursor surface should monitor Escape while the composer is open, including while TextEditor has focus."
+        )
+        XCTAssertTrue(
+            controllerSource.contains("event.keyCode == UInt16(kVK_Escape)"),
+            "The local key monitor should target Escape specifically."
+        )
+        XCTAssertTrue(
+            controllerSource.contains("override func cancelOperation"),
+            "The panel should handle AppKit cancelOperation for Escape routed through the responder chain."
+        )
+        XCTAssertTrue(
+            controllerSource.contains("override func keyDown(with event: NSEvent)"),
+            "The panel should fall back to direct keyDown handling when Escape reaches the window."
+        )
+        XCTAssertTrue(
+            controllerSource.contains("stopEscapeKeyMonitor()"),
+            "The local Escape monitor should be removed when the composer closes or hides."
+        )
+        XCTAssertTrue(
+            storeSource.contains("if inputMode == .voice {\n            cancelVoiceInput()"),
+            "Escape dismissal should cancel active voice input before closing the cursor surface."
+        )
+    }
+
+    func testCursorSurfaceUsesClickyOverlayTreatment() throws {
+        let controllerSource = try String(contentsOfFile: "Sources/AURA/Services/CursorSurfaceController.swift", encoding: .utf8)
+        let overlaySource = try String(contentsOfFile: "Sources/AURA/Views/CursorSurfaceOverlayView.swift", encoding: .utf8)
+
+        XCTAssertTrue(
+            controllerSource.contains("CursorSurfaceOverlayWindow"),
+            "The cursor surface should use a full-screen transparent overlay window."
+        )
+        XCTAssertTrue(
+            controllerSource.contains("level = .screenSaver"),
+            "The cursor surface should match Clicky's always-on-top overlay level."
+        )
+        XCTAssertTrue(
+            controllerSource.contains("hostingView.setAccessibilityElement(false)"),
+            "The visual-only overlay should be hidden from accessibility inspection."
+        )
+        XCTAssertTrue(
+            overlaySource.contains(".accessibilityHidden(true)"),
+            "The SwiftUI overlay content should be accessibility-hidden."
+        )
+        XCTAssertTrue(
+            overlaySource.contains("private let fullWelcomeMessage = \"hey! i'm clicky\""),
+            "The cursor surface should preserve Clicky's welcome copy."
+        )
+        XCTAssertTrue(
+            overlaySource.contains("Color(hex: \"#3380FF\")"),
+            "The cursor surface should use Clicky's blue cursor color."
+        )
+        XCTAssertTrue(
+            overlaySource.contains("ClickyCursorTriangle"),
+            "The cursor surface should render the Clicky triangle cursor."
+        )
+        XCTAssertTrue(
+            overlaySource.contains("BlueCursorWaveformView"),
+            "The cursor surface should render the Clicky listening waveform."
+        )
+        XCTAssertTrue(
+            overlaySource.contains("BlueCursorSpinnerView"),
+            "The cursor surface should render the Clicky processing spinner."
         )
     }
 
@@ -106,7 +230,7 @@ final class CursorSurfaceWorkflowTests: XCTestCase {
         )
     }
 
-    func testVoiceTranscriptionPausesBeforeHermesStarts() throws {
+    func testVoiceTranscriptionAutoStartsHermesLikeClicky() throws {
         let storeSource = try String(contentsOfFile: "Sources/AURA/Stores/AURAStore.swift", encoding: .utf8)
         guard let finishRange = storeSource.range(of: "private func finishVoiceInputAndTranscribe"),
               let meterRange = storeSource.range(of: "private func startVoiceMeter") else {
@@ -117,15 +241,23 @@ final class CursorSurfaceWorkflowTests: XCTestCase {
 
         XCTAssertTrue(
             transcriptionSource.contains("missionGoal = transcript"),
-            "The editable mission goal should become the voice transcript."
+            "The mission goal should become the final voice transcript before launch."
         )
         XCTAssertTrue(
-            transcriptionSource.contains("voiceInputState = .ready"),
-            "Voice transcription should pause in the transcript-ready state."
+            transcriptionSource.contains("if inputMode == .voice, canStartMission"),
+            "Voice transcription should gate auto-start through the normal mission readiness checks."
         )
         XCTAssertFalse(
+            transcriptionSource.contains("voiceInputState = .ready"),
+            "Voice transcription should not keep the legacy transcript-ready stopover."
+        )
+        XCTAssertFalse(
+            transcriptionSource.contains("Transcript ready"),
+            "Voice transcription should not keep the legacy transcript review copy."
+        )
+        XCTAssertTrue(
             transcriptionSource.contains("await startMission()"),
-            "Voice transcription must not auto-start Hermes."
+            "Voice transcription should auto-start Hermes instead of keeping the legacy Send/Retry review UI."
         )
         XCTAssertFalse(
             storeSource.contains("voiceInputTranscript"),
@@ -133,39 +265,76 @@ final class CursorSurfaceWorkflowTests: XCTestCase {
         )
     }
 
-    func testVoiceReadyActionsAreSendAndRetry() throws {
+    func testVoiceSurfaceDoesNotKeepLegacyReadyActions() throws {
         let source = try String(contentsOfFile: "Sources/AURA/Views/CursorSurfaceView.swift", encoding: .utf8)
-        XCTAssertTrue(
-            source.contains("TextEditor(text: $store.missionGoal)"),
-            "The voice transcript should be editable before sending."
-        )
-        XCTAssertTrue(
+        XCTAssertFalse(
             source.contains("Button(\"Send\")"),
-            "The ready voice transcript should expose Send."
+            "Voice input should use the Clicky waveform/spinner flow instead of a legacy Send button."
         )
-        XCTAssertTrue(
+        XCTAssertFalse(
             source.contains("Button(\"Retry\")"),
-            "Voice recording and ready states should expose Retry."
+            "Voice input should use the Clicky waveform/spinner flow instead of a legacy Retry button."
         )
         XCTAssertFalse(
             source.contains("Button(\"Redo\")"),
             "Voice recording should not use Redo, which conflicts with OS undo/redo meaning."
         )
+    }
+
+    func testTextInputUsesClickyBubbleWithKeyboardSubmission() throws {
+        let source = try String(contentsOfFile: "Sources/AURA/Views/CursorSurfaceView.swift", encoding: .utf8)
         XCTAssertTrue(
-            source.contains("Task { await store.redoVoiceInput() }"),
-            "Retry should route through the store so it can discard and immediately restart recording."
+            source.contains("TextEditor(text: $store.missionGoal)"),
+            "Typed input should stay available inside the Clicky-style bubble."
+        )
+        XCTAssertTrue(
+            source.contains("Command-Return"),
+            "Typed input should show the keyboard submission affordance."
+        )
+        XCTAssertTrue(
+            source.contains(".keyboardShortcut(.return, modifiers: [.command])"),
+            "Typed input should submit with Command-Return without restoring the old Start button."
+        )
+        XCTAssertFalse(
+            source.contains("Button(\"Start\""),
+            "The old visible Start button should not be rendered in the cursor surface."
         )
     }
 
-    func testTextStartIsOnlyRenderedWhenStartable() throws {
-        let source = try String(contentsOfFile: "Sources/AURA/Views/CursorSurfaceView.swift", encoding: .utf8)
+    func testDashboardPrioritizesMissionWorkflowBeforeDiagnostics() throws {
+        let source = try String(contentsOfFile: "Sources/AURA/Views/ContentView.swift", encoding: .utf8)
+        guard let missionRunnerRange = source.range(of: "MissionRunnerView(store: store)"),
+              let missionConfigRange = source.range(of: "MissionConfigurationCard(store: store)"),
+              let readinessRange = source.range(of: "ReadinessCenterView(store: store)") else {
+            XCTFail("Could not locate dashboard sections.")
+            return
+        }
+
+        XCTAssertLessThan(
+            missionRunnerRange.lowerBound,
+            missionConfigRange.lowerBound,
+            "The main window should lead with the mission workflow before config diagnostics."
+        )
+        XCTAssertLessThan(
+            missionRunnerRange.lowerBound,
+            readinessRange.lowerBound,
+            "The main window should lead with the mission workflow before doctor output."
+        )
+    }
+
+    func testMenuBarSetupCoversNonHostControlBlockers() throws {
+        let source = try String(contentsOfFile: "Sources/AURA/Views/MenuBarContentView.swift", encoding: .utf8)
         XCTAssertTrue(
-            source.contains("private var shouldShowTextStartButton: Bool"),
-            "Text Start visibility should be explicit."
+            source.contains("!store.cuaStatus.readyForHostControl || !store.canOpenAmbientEntryPoint"),
+            "The menu bar setup section should cover both host-control setup and input-readiness blockers."
         )
         XCTAssertTrue(
-            source.contains("store.inputMode == .text\n            && store.canStartMission"),
-            "Start should render for startable text input even while another session is running."
+            source.contains("store.microphonePermissionStatus.setupDetail"),
+            "Voice microphone blockers should be explained directly in the menu bar panel."
+        )
+        XCTAssertTrue(
+            source.contains("handleMicrophonePermissionAction"),
+            "The menu bar panel should offer the relevant microphone grant/open action when voice is blocked."
         )
     }
 
@@ -174,6 +343,58 @@ final class CursorSurfaceWorkflowTests: XCTestCase {
         XCTAssertTrue(
             source.contains(".menuBarExtraStyle(.window)"),
             "AURA's data-rich menu bar companion panel should use SwiftUI MenuBarExtra window style."
+        )
+    }
+
+    func testNewRequestsOnlyOpenFromGlobalShortcut() throws {
+        let dashboardSource = try String(contentsOfFile: "Sources/AURA/Views/ContentView.swift", encoding: .utf8)
+        let missionRunnerSource = try String(contentsOfFile: "Sources/AURA/Views/MissionRunnerView.swift", encoding: .utf8)
+        let menuSource = try String(contentsOfFile: "Sources/AURA/Views/MenuBarContentView.swift", encoding: .utf8)
+        let appSource = try String(contentsOfFile: "Sources/AURA/App/AURAApp.swift", encoding: .utf8)
+        let modelSource = try String(contentsOfFile: "Sources/AURA/Models/AURAMission.swift", encoding: .utf8)
+        let storeSource = try String(contentsOfFile: "Sources/AURA/Stores/AURAStore.swift", encoding: .utf8)
+        let hotKeySource = try String(contentsOfFile: "Sources/AURA/Services/GlobalHotKeyController.swift", encoding: .utf8)
+        let visibleUISource = [dashboardSource, missionRunnerSource, menuSource, appSource, modelSource].joined(separator: "\n")
+
+        XCTAssertFalse(
+            visibleUISource.contains("New Request"),
+            "Dashboard, menu bar, commands, and input-mode labels should not expose a New Request action."
+        )
+        XCTAssertFalse(
+            visibleUISource.contains("aura.newMission"),
+            "The dashboard header New Request accessibility hook should not be present."
+        )
+        XCTAssertFalse(
+            visibleUISource.contains("aura.openPanel"),
+            "The mission runner New Request accessibility hook should not be present."
+        )
+        XCTAssertFalse(
+            visibleUISource.contains("inputMode.actionTitle"),
+            "Input-mode action titles should not drive visible request buttons."
+        )
+        XCTAssertFalse(
+            [dashboardSource, missionRunnerSource, menuSource, appSource].joined(separator: "\n").contains("openMissionInput()"),
+            "Dashboard, mission runner, menu bar, and app commands should not directly open the request composer."
+        )
+        XCTAssertFalse(
+            appSource.contains(".keyboardShortcut(\"a\""),
+            "The app commands menu should not expose the request shortcut as a visible command."
+        )
+        XCTAssertTrue(
+            storeSource.contains("private lazy var globalHotKey = GlobalHotKeyController { [weak self] in\n        self?.openMissionInput()"),
+            "The global shortcut should remain the request entry point."
+        )
+        XCTAssertTrue(
+            hotKeySource.contains("RegisterEventHotKey"),
+            "AURA should keep registering the system shortcut."
+        )
+        XCTAssertTrue(
+            hotKeySource.contains("kVK_ANSI_A"),
+            "The shortcut should remain bound to A."
+        )
+        XCTAssertTrue(
+            menuSource.contains("Press ⌃⌥⌘A"),
+            "The menu bar should explain the shortcut-only request flow instead of showing a button."
         )
     }
 
